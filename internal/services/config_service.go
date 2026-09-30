@@ -58,14 +58,10 @@ func (s *PracticeConfigService) GetConfig() (*domain.PracticeConfig, error) {
 // It runs as step one of first-run onboarding, before any provider exists, so a session is
 // only required once the clinic has an active provider who could have logged in.
 func (s *PracticeConfigService) SetConfig(token string, countryCode string) (*domain.PracticeConfig, error) {
-	hasProvider, err := s.repo.HasActiveProvider(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	if hasProvider {
-		if err := s.requireSession(token); err != nil {
-			return nil, err
-		}
+	save := s.repo.Save
+	if s.requireSession(token) != nil {
+		// The repo checks for an active provider in the same statement as the write.
+		save = s.repo.SaveInitialConfig
 	}
 
 	meta, err := s.GetCountryConfig(countryCode)
@@ -84,7 +80,10 @@ func (s *PracticeConfigService) SetConfig(token string, countryCode string) (*do
 		action = domain.AuditActionCreate
 	}
 
-	if err := s.repo.Save(context.Background(), cfg); err != nil {
+	if err := save(context.Background(), cfg); err != nil {
+		if errors.Is(err, storage.ErrAlreadyInitialized) {
+			return nil, ErrUnauthorized
+		}
 		return nil, fmt.Errorf("failed to save practice config: %w", err)
 	}
 	s.logAction(token, action, "practice_config", "Set practice config during onboarding")

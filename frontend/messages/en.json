@@ -634,6 +634,7 @@
   "onboarding_provider_body": "This will be the first staff login for your practice. Once signed in, you can add the rest of your team from the Clinic tab. Every change to patient, billing, and clinic records is recorded in the audit log under the person who is signed in.",
   "onboarding_provider_pin_confirm_label": "Confirm PIN",
   "onboarding_provider_pin_hint": "Exactly 4 digits. You will use this PIN to sign in.",
+  "onboarding_provider_error_name_required": "Name is required.",
   "onboarding_provider_error_pin_format": "PIN must be exactly 4 digits.",
   "onboarding_provider_error_pin_mismatch": "PINs do not match.",
   "onboarding_provider_error_failed": "Could not create the provider account. Please try again.",

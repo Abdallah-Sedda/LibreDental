@@ -298,6 +298,8 @@
       if (isEditingProfile) cancelEditProfile();
       showProviderModal = false;
       showOperatoryModal = false;
+      showConfirmDeleteProvider = false;
+      showConfirmDeleteOperatory = false;
     });
   });
 
@@ -720,7 +722,7 @@
     {:else if activeSubTab === "documents"}
       <DocumentsSection bind:openUploadModal={triggerUploadDocument} />
     {:else if activeSubTab === "integrations"}
-      <IntegrationsSection />
+      <IntegrationsSection {canEdit} />
     {/if}
   </div>
 </div>

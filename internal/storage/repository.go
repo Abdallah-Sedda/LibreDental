@@ -53,6 +53,7 @@ type PracticeConfigRepository interface {
 	ListProviders(ctx context.Context) ([]*domain.Provider, error)
 	SaveProvider(ctx context.Context, provider *domain.Provider) error
 	CreateInitialProvider(ctx context.Context, provider *domain.Provider) error
+	SaveInitialConfig(ctx context.Context, cfg *domain.PracticeConfig) error
 	HasActiveProvider(ctx context.Context) (bool, error)
 	DeleteProvider(ctx context.Context, id string) error
 

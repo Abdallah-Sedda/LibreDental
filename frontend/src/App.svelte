@@ -223,7 +223,10 @@
         showOnboarding = true;
       }
     } catch (err) {
+      // Fall back to step 2: if a provider does exist, creating one routes to sign-in instead.
       console.error("Failed to check for initial provider:", err);
+      onboardingStep = 2;
+      showOnboarding = true;
     }
   }
 
@@ -246,10 +249,20 @@
         onboardingStep = 2;
         return;
       }
+      // Another client created the first provider while this one was on step one.
+      if (!auth.token) {
+        await handleAlreadyInitialized();
+        return;
+      }
       showOnboarding = false;
       await refreshPatientLists();
       await loadAppointments();
-    } catch (err) {
+    } catch (err: any) {
+      // A sessionless save is rejected once another client has created the first provider.
+      if (!auth.token && err?.message?.includes("unauthorized")) {
+        await handleAlreadyInitialized();
+        return;
+      }
       console.error("Failed to save onboarding practice config:", err);
     }
   }

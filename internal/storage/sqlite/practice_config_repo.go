@@ -76,6 +76,25 @@ func (r *PracticeConfigRepository) Get(ctx context.Context) (*domain.PracticeCon
 }
 
 func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.PracticeConfig) error {
+	_, err := r.save(ctx, cfg, false)
+	return err
+}
+
+// SaveInitialConfig saves the practice config only while the clinic has no active
+// provider. The check and the write are one statement so a sessionless first-run save
+// can't land after another client has already created the first provider.
+func (r *PracticeConfigRepository) SaveInitialConfig(ctx context.Context, cfg *domain.PracticeConfig) error {
+	rows, err := r.save(ctx, cfg, true)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return storage.ErrAlreadyInitialized
+	}
+	return nil
+}
+
+func (r *PracticeConfigRepository) save(ctx context.Context, cfg *domain.PracticeConfig, onlyWithoutProvider bool) (int64, error) {
 	now := time.Now().UTC()
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = now
@@ -89,7 +108,13 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 
 	hoursJSON, err := json.Marshal(cfg.BusinessHours)
 	if err != nil {
-		return fmt.Errorf("failed to marshal business hours: %w", err)
+		return 0, fmt.Errorf("failed to marshal business hours: %w", err)
+	}
+
+	source := `VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if onlyWithoutProvider {
+		source = `SELECT 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+	WHERE NOT EXISTS (SELECT 1 FROM providers WHERE is_active = 1)`
 	}
 
 	query := `
@@ -98,7 +123,7 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		address_line1, address_line2, city, state_province, postal_code,
 		country_code, currency, tooth_system, date_format, business_hours,
 		created_at, updated_at
-	) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) ` + source + `
 	ON CONFLICT(id) DO UPDATE SET
 		clinic_name = excluded.clinic_name,
 		tagline = excluded.tagline,
@@ -119,7 +144,7 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		business_hours = excluded.business_hours,
 		updated_at = excluded.updated_at`
 
-	_, err = r.db.ExecContext(
+	res, err := r.db.ExecContext(
 		ctx, query,
 		cfg.ClinicName, cfg.Tagline, cfg.TaxID, cfg.LicenseNumber, cfg.Phone, cfg.Email, cfg.Website,
 		cfg.AddressLine1, cfg.AddressLine2, cfg.City, cfg.StateProvince, cfg.PostalCode,
@@ -127,10 +152,13 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		cfg.CreatedAt, cfg.UpdatedAt,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to save practice config: %w", err)
+		return 0, fmt.Errorf("failed to save practice config: %w", err)
 	}
-
-	return nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to check practice config save result: %w", err)
+	}
+	return rows, nil
 }
 
 // Providers CRUD

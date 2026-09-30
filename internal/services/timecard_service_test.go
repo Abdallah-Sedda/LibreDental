@@ -140,6 +140,12 @@ func TestTimecardService_ClockRequiresSession(t *testing.T) {
 	if _, err := service.ClockOut("", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
 		t.Fatalf("Expected ClockOut without session to be unauthorized, got %v", err)
 	}
+	if _, err := service.ClockIn("unknown-token", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockIn with unknown token to be unauthorized, got %v", err)
+	}
+	if _, err := service.ClockOut("unknown-token", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockOut with unknown token to be unauthorized, got %v", err)
+	}
 
 	token, err := auditService.CreateSession("prov_clock", "1234")
 	if err != nil {

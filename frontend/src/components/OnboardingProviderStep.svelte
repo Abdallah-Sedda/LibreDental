@@ -23,8 +23,13 @@
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    if (isSubmitting || !name.trim()) return;
+    if (isSubmitting) return;
     errorMsg = "";
+
+    if (!name.trim()) {
+      errorMsg = m.onboarding_provider_error_name_required();
+      return;
+    }
 
     if (!/^[0-9]{4}$/.test(pin)) {
       errorMsg = m.onboarding_provider_error_pin_format();

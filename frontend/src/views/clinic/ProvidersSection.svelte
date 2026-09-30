@@ -87,8 +87,14 @@
 
   async function toggleModalPin() {
     if (!showModalPin && provId && provPin === "****") {
+      const requestedId = provId;
       try {
-        provPin = await PracticeConfigService.GetProviderPin(auth.token, provId);
+        const pin = await PracticeConfigService.GetProviderPin(auth.token, requestedId);
+        // The modal may have closed or moved to another provider while this was in flight.
+        if (!showProviderModal || provId !== requestedId || provPin !== "****") return;
+        // Keep the mask for a provider with no stored PIN so the required field stays valid.
+        if (!pin) return;
+        provPin = pin;
       } catch (e) {
         console.error("Failed to reveal PIN", e);
         return;

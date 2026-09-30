@@ -382,3 +382,38 @@ func TestPracticeConfigRepository_SaveProvider_LastActiveGuard(t *testing.T) {
 		t.Fatalf("Expected editing an inactive provider to succeed, got %v", err)
 	}
 }
+
+func TestPracticeConfigRepository_SaveInitialConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := sqlite.Open(filepath.Join(tempDir, "test_initial_config.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	repo := sqlite.NewPracticeConfigRepository(db)
+	ctx := context.Background()
+
+	if err := repo.SaveInitialConfig(ctx, &domain.PracticeConfig{CountryCode: "US", Currency: "USD"}); err != nil {
+		t.Fatalf("Expected initial config save before any provider, got %v", err)
+	}
+	if err := repo.SaveInitialConfig(ctx, &domain.PracticeConfig{CountryCode: "CA", Currency: "CAD"}); err != nil {
+		t.Fatalf("Expected initial config update before any provider, got %v", err)
+	}
+
+	if err := repo.CreateInitialProvider(ctx, &domain.Provider{ID: "prov_first", Name: "First", Role: domain.RoleDentist, Pin: "1234"}); err != nil {
+		t.Fatalf("Failed to create initial provider: %v", err)
+	}
+
+	if err := repo.SaveInitialConfig(ctx, &domain.PracticeConfig{CountryCode: "GB", Currency: "GBP"}); !errors.Is(err, storage.ErrAlreadyInitialized) {
+		t.Fatalf("Expected ErrAlreadyInitialized once a provider exists, got %v", err)
+	}
+
+	cfg, err := repo.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
+	if cfg.CountryCode != "CA" {
+		t.Fatalf("Expected config to remain CA after rejected save, got %s", cfg.CountryCode)
+	}
+}
