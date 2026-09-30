@@ -259,3 +259,126 @@ func TestPracticeConfigRepository_DeleteProvider_ConcurrentRace(t *testing.T) {
 		t.Fatalf("Expected exactly 1 active provider remaining, got %d", activeCount)
 	}
 }
+
+func TestPracticeConfigRepository_CreateInitialProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := sqlite.Open(filepath.Join(tempDir, "test_initial_provider.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	repo := sqlite.NewPracticeConfigRepository(db)
+	ctx := context.Background()
+
+	has, err := repo.HasActiveProvider(ctx)
+	if err != nil || has {
+		t.Fatalf("Expected no active provider on fresh db, got has=%v err=%v", has, err)
+	}
+
+	first := &domain.Provider{ID: "prov_first", Name: "First", Role: domain.RoleDentist, Pin: "1234"}
+	if err := repo.CreateInitialProvider(ctx, first); err != nil {
+		t.Fatalf("Failed to create initial provider: %v", err)
+	}
+	if !first.IsActive {
+		t.Errorf("Expected initial provider to be forced active")
+	}
+
+	has, err = repo.HasActiveProvider(ctx)
+	if err != nil || !has {
+		t.Fatalf("Expected an active provider after bootstrap, got has=%v err=%v", has, err)
+	}
+
+	second := &domain.Provider{ID: "prov_second", Name: "Second", Role: domain.RoleDentist, Pin: "5678"}
+	if err := repo.CreateInitialProvider(ctx, second); !errors.Is(err, storage.ErrAlreadyInitialized) {
+		t.Fatalf("Expected ErrAlreadyInitialized once a provider exists, got %v", err)
+	}
+
+	providers, err := repo.ListProviders(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list providers: %v", err)
+	}
+	if len(providers) != 1 || providers[0].ID != "prov_first" {
+		t.Fatalf("Expected only the first provider to exist, got %+v", providers)
+	}
+}
+
+func TestPracticeConfigRepository_CreateInitialProvider_ConcurrentRace(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := sqlite.Open(filepath.Join(tempDir, "test_initial_provider_race.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	repo := sqlite.NewPracticeConfigRepository(db)
+	ctx := context.Background()
+
+	ids := []string{"prov_a", "prov_b", "prov_c", "prov_d"}
+	var wg sync.WaitGroup
+	errs := make([]error, len(ids))
+	for i, id := range ids {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			errs[i] = repo.CreateInitialProvider(ctx, &domain.Provider{ID: id, Name: id, Role: domain.RoleDentist, Pin: "1234"})
+		}(i, id)
+	}
+	wg.Wait()
+
+	successCount := 0
+	for _, err := range errs {
+		if err == nil {
+			successCount++
+		} else if !errors.Is(err, storage.ErrAlreadyInitialized) {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+	}
+	if successCount != 1 {
+		t.Fatalf("Expected exactly 1 concurrent bootstrap to succeed, got %d", successCount)
+	}
+}
+
+func TestPracticeConfigRepository_SaveProvider_LastActiveGuard(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := sqlite.Open(filepath.Join(tempDir, "test_save_last_active.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	repo := sqlite.NewPracticeConfigRepository(db)
+	ctx := context.Background()
+
+	only := &domain.Provider{ID: "prov_only", Name: "Only", Role: domain.RoleDentist, IsActive: true}
+	if err := repo.SaveProvider(ctx, only); err != nil {
+		t.Fatalf("Failed to save provider: %v", err)
+	}
+
+	only.IsActive = false
+	if err := repo.SaveProvider(ctx, only); !errors.Is(err, storage.ErrLastActiveProvider) {
+		t.Fatalf("Expected ErrLastActiveProvider when deactivating the only active provider, got %v", err)
+	}
+
+	only.IsActive = true
+	only.Name = "Renamed"
+	if err := repo.SaveProvider(ctx, only); err != nil {
+		t.Fatalf("Expected editing an active provider to succeed, got %v", err)
+	}
+
+	other := &domain.Provider{ID: "prov_other", Name: "Other", Role: domain.RoleDentist, IsActive: true}
+	if err := repo.SaveProvider(ctx, other); err != nil {
+		t.Fatalf("Failed to save second provider: %v", err)
+	}
+
+	only.IsActive = false
+	if err := repo.SaveProvider(ctx, only); err != nil {
+		t.Fatalf("Expected deactivation to succeed with another active provider, got %v", err)
+	}
+
+	// Editing an already-inactive provider must not trip the guard.
+	only.Name = "Renamed Again"
+	if err := repo.SaveProvider(ctx, only); err != nil {
+		t.Fatalf("Expected editing an inactive provider to succeed, got %v", err)
+	}
+}

@@ -1,11 +1,13 @@
 package services_test
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/LibreDental/libredental/internal/domain"
 	"github.com/LibreDental/libredental/internal/services"
+	"github.com/LibreDental/libredental/internal/storage"
 	"github.com/LibreDental/libredental/internal/storage/sqlite"
 )
 
@@ -183,5 +185,134 @@ func TestPracticeConfigService(t *testing.T) {
 	}
 	if len(opsAfterDelete) != 1 || opsAfterDelete[0].IsActive {
 		t.Errorf("Expected operatory to be inactive after deletion, got active or wrong count: %d", len(opsAfterDelete))
+	}
+}
+
+func TestPracticeConfigService_OnboardingAndSessionGating(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := sqlite.Open(filepath.Join(tempDir, "main.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	auditDb, err := sqlite.OpenAudit(filepath.Join(tempDir, "audit.db"))
+	if err != nil {
+		t.Fatalf("Failed to open audit sqlite db: %v", err)
+	}
+	defer auditDb.Close()
+
+	repo := sqlite.NewPracticeConfigRepository(db)
+	auditService := services.NewAuditService(sqlite.NewAuditRepository(auditDb), repo)
+	service := services.NewPracticeConfigService(repo, auditService)
+
+	// Step 1: country selection works without a session on a fresh install.
+	if _, err := service.SetConfig("", "US"); err != nil {
+		t.Fatalf("Expected unauthenticated SetConfig before any provider exists, got %v", err)
+	}
+
+	needs, err := service.NeedsInitialProvider()
+	if err != nil || !needs {
+		t.Fatalf("Expected fresh install to need an initial provider, got needs=%v err=%v", needs, err)
+	}
+
+	// Nothing else can be changed without a session.
+	if _, err := service.SaveProvider("", domain.Provider{Name: "Sneaky", Pin: "0000", IsActive: true}); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected SaveProvider without session to be unauthorized, got %v", err)
+	}
+
+	for _, bad := range []domain.Provider{
+		{Name: "", Pin: "1234"},
+		{Name: "Dr. Short", Pin: "123"},
+		{Name: "Dr. Alpha", Pin: "12a4"},
+	} {
+		if _, err := service.CreateInitialProvider(bad); !errors.Is(err, storage.ErrInvalidInput) {
+			t.Fatalf("Expected ErrInvalidInput for %+v, got %v", bad, err)
+		}
+	}
+
+	// Step 2: first provider is created and logged in.
+	token, err := service.CreateInitialProvider(domain.Provider{Name: "Dr. First", Pin: "1234"})
+	if err != nil {
+		t.Fatalf("Failed to create initial provider: %v", err)
+	}
+	user := auditService.GetSessionUser(token)
+	if user == nil || user.Name != "Dr. First" || user.Role != domain.RoleDentist {
+		t.Fatalf("Expected session for the new dentist provider, got %+v", user)
+	}
+
+	logs, err := auditService.GetAuditLogs(token, "", 10, 0)
+	if err != nil {
+		t.Fatalf("Failed to read audit logs: %v", err)
+	}
+	if len(logs) != 1 || logs[0].Action != domain.AuditActionCreate || logs[0].UserID != user.ID || logs[0].Resource != "provider" {
+		t.Fatalf("Expected one provider-create audit entry by the new provider, got %+v", logs)
+	}
+
+	needs, err = service.NeedsInitialProvider()
+	if err != nil || needs {
+		t.Fatalf("Expected no initial provider needed after bootstrap, got needs=%v err=%v", needs, err)
+	}
+
+	if _, err := service.CreateInitialProvider(domain.Provider{Name: "Dr. Second", Pin: "5678"}); !errors.Is(err, storage.ErrAlreadyInitialized) {
+		t.Fatalf("Expected second bootstrap to fail with ErrAlreadyInitialized, got %v", err)
+	}
+
+	// Once a provider exists, every config mutation requires a session.
+	if _, err := service.SetConfig("", "US"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected SetConfig without session to be unauthorized after bootstrap, got %v", err)
+	}
+	cfg, err := service.GetConfig()
+	if err != nil {
+		t.Fatalf("Failed to get config: %v", err)
+	}
+	if _, err := service.UpdatePracticeConfig("", *cfg); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected UpdatePracticeConfig without session to be unauthorized, got %v", err)
+	}
+	if err := service.DeleteProvider("", user.ID); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected DeleteProvider without session to be unauthorized, got %v", err)
+	}
+	if _, err := service.SaveOperatory("", domain.Operatory{Name: "Op"}); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected SaveOperatory without session to be unauthorized, got %v", err)
+	}
+	if err := service.DeleteOperatory("", "op_x"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected DeleteOperatory without session to be unauthorized, got %v", err)
+	}
+
+	// With the session, the same calls go through.
+	if _, err := service.SetConfig(token, "US"); err != nil {
+		t.Fatalf("Expected SetConfig with session to succeed, got %v", err)
+	}
+	if _, err := service.SaveProvider(token, domain.Provider{Name: "Dr. Second", Pin: "5678", IsActive: true}); err != nil {
+		t.Fatalf("Expected SaveProvider with session to succeed, got %v", err)
+	}
+	if _, err := service.SaveOperatory(token, domain.Operatory{Name: "Op 1", IsActive: true}); err != nil {
+		t.Fatalf("Expected SaveOperatory with session to succeed, got %v", err)
+	}
+
+	// PIN lookup for forgotten PINs: requires a session and is audit-logged.
+	if _, err := service.GetProviderPin("", user.ID); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected GetProviderPin without session to be unauthorized, got %v", err)
+	}
+	pin, err := service.GetProviderPin(token, user.ID)
+	if err != nil || pin != "1234" {
+		t.Fatalf("Expected GetProviderPin to return 1234, got %q err=%v", pin, err)
+	}
+	if _, err := service.GetProviderPin(token, "prov_missing"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Expected ErrNotFound for unknown provider, got %v", err)
+	}
+	logs, err = auditService.GetAuditLogs(token, "", 50, 0)
+	if err != nil {
+		t.Fatalf("Failed to read audit logs: %v", err)
+	}
+	revealLogged := false
+	for _, l := range logs {
+		if l.Action == domain.AuditActionRead && l.Resource == "provider" {
+			revealLogged = true
+		}
+	}
+	if !revealLogged {
+		t.Fatalf("Expected a READ audit entry for the PIN reveal, got %+v", logs)
 	}
 }
