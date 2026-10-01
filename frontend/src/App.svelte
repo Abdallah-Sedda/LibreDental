@@ -125,6 +125,7 @@
   let countryMeta = $state<CountryConfig | null>(null);
   let supportedCountries = $state<CountryConfig[]>([]);
   let showOnboarding = $state(false);
+  let onboardingStep = $state<1 | 2>(1);
 
   // Patient Modal states
   let showPatientModal = $state(false);
@@ -199,6 +200,7 @@
       const cfg = await PracticeConfigService.GetConfig();
       if (!cfg || !cfg.country_code) {
         showOnboarding = true;
+        onboardingStep = 1;
         await loadCountryMeta("");
       } else {
         practiceConfig = cfg;
@@ -207,7 +209,24 @@
     } catch (err) {
       console.error("Failed to check practice config:", err);
       showOnboarding = true;
+      onboardingStep = 1;
       await loadCountryMeta("");
+    }
+  }
+
+  // Covers installs that finished country setup but quit before creating the first provider.
+  async function checkInitialProvider() {
+    if (showOnboarding) return;
+    try {
+      if (await PracticeConfigService.NeedsInitialProvider()) {
+        onboardingStep = 2;
+        showOnboarding = true;
+      }
+    } catch (err) {
+      // Fall back to step 2: if a provider does exist, creating one routes to sign-in instead.
+      console.error("Failed to check for initial provider:", err);
+      onboardingStep = 2;
+      showOnboarding = true;
     }
   }
 
@@ -226,12 +245,39 @@
       const cfg = await PracticeConfigService.SetConfig(auth.token, countryCode);
       practiceConfig = cfg;
       await loadCountryMeta(countryCode);
+      if (await PracticeConfigService.NeedsInitialProvider()) {
+        onboardingStep = 2;
+        return;
+      }
+      // Another client created the first provider while this one was on step one.
+      if (!auth.token) {
+        await handleAlreadyInitialized();
+        return;
+      }
       showOnboarding = false;
       await refreshPatientLists();
       await loadAppointments();
-    } catch (err) {
+    } catch (err: any) {
+      // A sessionless save is rejected once another client has created the first provider.
+      if (!auth.token && err?.message?.includes("unauthorized")) {
+        await handleAlreadyInitialized();
+        return;
+      }
       console.error("Failed to save onboarding practice config:", err);
     }
+  }
+
+  async function handleInitialProviderCreated() {
+    showOnboarding = false;
+    onboardingStep = 1;
+    await loadClinicData();
+  }
+
+  async function handleAlreadyInitialized() {
+    showOnboarding = false;
+    onboardingStep = 1;
+    await loadClinicData();
+    showStaffLoginModal = true;
   }
 
   async function loadClinicData() {
@@ -694,6 +740,7 @@
     await initLocale();
 
     await checkConfig();
+    await checkInitialProvider();
     await loadClinicData();
   });
 </script>
@@ -719,6 +766,7 @@
         bind:providers
         bind:operatories
         onrefresh={refreshClinic}
+        onrequestlogin={() => (showStaffLoginModal = true)}
       />
     {:else if activeTab === "patients"}
       <PatientsView
@@ -768,7 +816,15 @@
   onlogout={() => (activeTab = "clinic")}
 />
 
-<OnboardingModal bind:showOnboarding {supportedCountries} oncomplete={handleOnboardingComplete} />
+<OnboardingModal
+  bind:showOnboarding
+  bind:step={onboardingStep}
+  {supportedCountries}
+  savedCountry={practiceConfig?.country_code}
+  oncomplete={handleOnboardingComplete}
+  onprovidercreated={handleInitialProviderCreated}
+  onalreadyinitialized={handleAlreadyInitialized}
+/>
 
 <PatientModal
   bind:showPatientModal

@@ -17,6 +17,7 @@
   import DocumentsSection from "./clinic/DocumentsSection.svelte";
   import IntegrationsSection from "./clinic/IntegrationsSection.svelte";
   import { m } from "../paraglide/messages.js";
+  import { untrack } from "svelte";
   import ConfirmModal from "../components/ui/ConfirmModal.svelte";
 
   let {
@@ -26,6 +27,7 @@
     providers = $bindable([]),
     operatories = $bindable([]),
     onrefresh,
+    onrequestlogin,
   } = $props<{
     practiceConfig: PracticeConfig | null;
     countryMeta?: CountryConfig | null;
@@ -33,7 +35,11 @@
     providers: Provider[];
     operatories: Operatory[];
     onrefresh: () => Promise<void>;
+    onrequestlogin: () => void;
   }>();
+
+  // Anyone can view clinic setup, but changes require a signed-in provider so they're audited.
+  let canEdit = $derived(!!auth.token);
 
   let activeSubTab = $state<
     "profile" | "hours" | "providers" | "operatories" | "documents" | "integrations"
@@ -286,6 +292,17 @@
     profileMessage = null;
   }
 
+  $effect(() => {
+    if (canEdit) return;
+    untrack(() => {
+      if (isEditingProfile) cancelEditProfile();
+      showProviderModal = false;
+      showOperatoryModal = false;
+      showConfirmDeleteProvider = false;
+      showConfirmDeleteOperatory = false;
+    });
+  });
+
   async function handleSaveConfig() {
     savingProfile = true;
     profileMessage = null;
@@ -324,13 +341,13 @@
       );
       if (res) {
         practiceConfig = res;
-        setProfileMessage("Clinic settings saved!", "success");
+        setProfileMessage(m.clinic_save_success(), "success");
         isEditingProfile = false;
         await onrefresh();
       }
     } catch (err) {
       console.error("Failed to update clinic config:", err);
-      setProfileMessage("Failed to save settings.", "error");
+      setProfileMessage(m.clinic_save_failed(), "error");
     } finally {
       savingProfile = false;
     }
@@ -479,12 +496,12 @@
   }
 
   let tabs = $derived([
-    { id: "profile", label: "Practice Profile & Standards" },
-    { id: "hours", label: "Operating Hours" },
-    { id: "providers", label: "Providers & Staff", count: providers.length },
-    { id: "operatories", label: "Operatories & Chairs", count: operatories.length },
-    { id: "documents", label: "Clinic Documents" },
-    { id: "integrations", label: "Integrations" },
+    { id: "profile", label: m.clinic_tab_profile() },
+    { id: "hours", label: m.clinic_tab_hours() },
+    { id: "providers", label: m.clinic_tab_providers(), count: providers.length },
+    { id: "operatories", label: m.clinic_tab_operatories(), count: operatories.length },
+    { id: "documents", label: m.clinic_tab_documents() },
+    { id: "integrations", label: m.clinic_tab_integrations() },
   ]);
 </script>
 
@@ -501,12 +518,19 @@
               : "border-rose-500/30 bg-rose-500/10 text-rose-400"
           }`}
         >
-          <span>{profileMessage.type === "success" ? "✓" : "⚠️"}</span>
           <span>{profileMessage.text}</span>
         </div>
       {/if}
 
-      {#if activeSubTab === "profile" || activeSubTab === "hours"}
+      {#if !canEdit}
+        <button
+          type="button"
+          onclick={onrequestlogin}
+          class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+        >
+          {m.clinic_signin_to_edit()}
+        </button>
+      {:else if activeSubTab === "profile" || activeSubTab === "hours"}
         <div class="flex items-center gap-2">
           {#if !isEditingProfile}
             <button
@@ -524,7 +548,11 @@
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
-              <span>{activeSubTab === "hours" ? "Edit Hours" : "Edit Practice Info"}</span>
+              <span
+                >{activeSubTab === "hours"
+                  ? m.clinic_edit_hours_btn()
+                  : m.clinic_edit_profile_btn()}</span
+              >
             </button>
           {:else}
             <button
@@ -533,7 +561,7 @@
               disabled={savingProfile}
               class="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
             >
-              Cancel
+              {m.common_cancel()}
             </button>
             <button
               type="button"
@@ -545,7 +573,7 @@
                 <div
                   class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"
                 ></div>
-                <span>Saving...</span>
+                <span>{m.clinic_saving()}</span>
               {:else}
                 <svg
                   class="h-4 w-4"
@@ -558,7 +586,7 @@
                   <polyline points="17 21 17 13 7 13 7 21" />
                   <polyline points="7 3 7 8 15 8" />
                 </svg>
-                <span>Save Changes</span>
+                <span>{m.clinic_save_changes_btn()}</span>
               {/if}
             </button>
           {/if}
@@ -657,12 +685,14 @@
     {:else if activeSubTab === "providers"}
       <ProvidersSection
         {providers}
+        {canEdit}
         {openAddProviderModal}
         {openEditProviderModal}
         {handleDeleteProvider}
         {handleSaveProvider}
         bind:showProviderModal
         {isEditingProvider}
+        {provId}
         bind:provName
         bind:provRole
         bind:provSpecialty
@@ -677,6 +707,7 @@
     {:else if activeSubTab === "operatories"}
       <OperatoriesSection
         {operatories}
+        {canEdit}
         {openAddOperatoryModal}
         {openEditOperatoryModal}
         {handleDeleteOperatory}
@@ -691,7 +722,7 @@
     {:else if activeSubTab === "documents"}
       <DocumentsSection bind:openUploadModal={triggerUploadDocument} />
     {:else if activeSubTab === "integrations"}
-      <IntegrationsSection />
+      <IntegrationsSection {canEdit} />
     {/if}
   </div>
 </div>

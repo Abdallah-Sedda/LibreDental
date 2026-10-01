@@ -7,9 +7,8 @@ import (
 	"github.com/LibreDental/libredental/internal/domain"
 )
 
-// bootstrapFirstProvider creates the very first provider through PracticeConfigService
-// without a session token (the same way a fresh install's onboarding would, since no
-// session can exist before any provider does), then opens a session as that provider.
+// bootstrapFirstProvider creates the very first provider through the same unauthenticated
+// onboarding path a fresh install uses, which also opens a session as that provider.
 // The returned token is used to authenticate every subsequent seed step.
 func bootstrapFirstProvider(g *ServiceGraph, now time.Time, summary *SeedSummary) (string, error) {
 	first := domain.Provider{
@@ -27,23 +26,24 @@ func bootstrapFirstProvider(g *ServiceGraph, now time.Time, summary *SeedSummary
 		UpdatedAt:     now,
 	}
 
-	if _, err := g.Practice.SaveProvider("", first); err != nil {
+	token, err := g.Practice.CreateInitialProvider(first)
+	if err != nil {
 		return "", fmt.Errorf("failed to bootstrap first provider: %w", err)
 	}
 	summary.ProvidersCount++
-
-	token, err := g.Audit.CreateSession(first.ID, first.Pin)
-	if err != nil {
-		return "", fmt.Errorf("failed to create bootstrap session: %w", err)
-	}
 	return token, nil
 }
 
-func seedPracticeConfig(g *ServiceGraph, now time.Time, summary *SeedSummary) error {
+// initPracticeConfig sets the practice country unauthenticated, as onboarding step one does.
+func initPracticeConfig(g *ServiceGraph) (*domain.PracticeConfig, error) {
 	cfg, err := g.Practice.SetConfig("", string(domain.CountryUS))
 	if err != nil {
-		return fmt.Errorf("failed to initialize practice config: %w", err)
+		return nil, fmt.Errorf("failed to initialize practice config: %w", err)
 	}
+	return cfg, nil
+}
+
+func seedPracticeConfig(g *ServiceGraph, token string, cfg *domain.PracticeConfig, now time.Time, summary *SeedSummary) error {
 
 	cfg.ClinicName = "Apex Dental Studio"
 	cfg.Tagline = "Modern Dental Care & Implant Center"
@@ -61,7 +61,7 @@ func seedPracticeConfig(g *ServiceGraph, now time.Time, summary *SeedSummary) er
 	cfg.CreatedAt = now
 	cfg.UpdatedAt = now
 
-	if _, err := g.Practice.UpdatePracticeConfig("", *cfg); err != nil {
+	if _, err := g.Practice.UpdatePracticeConfig(token, *cfg); err != nil {
 		return fmt.Errorf("failed to seed practice config: %w", err)
 	}
 	summary.PracticeConfigured = true

@@ -15,6 +15,10 @@ var (
 	// ErrLastActiveProvider is returned when an operation would leave the clinic
 	// with zero active providers, which is not allowed.
 	ErrLastActiveProvider = errors.New("cannot deactivate the last active provider")
+
+	// ErrAlreadyInitialized is returned when first-run bootstrap is attempted on a
+	// clinic that already has an active provider.
+	ErrAlreadyInitialized = errors.New("clinic already has an active provider")
 )
 
 // PatientRepository defines storage operations for patient demographic records.
@@ -48,6 +52,9 @@ type PracticeConfigRepository interface {
 
 	ListProviders(ctx context.Context) ([]*domain.Provider, error)
 	SaveProvider(ctx context.Context, provider *domain.Provider) error
+	CreateInitialProvider(ctx context.Context, provider *domain.Provider) error
+	SaveInitialConfig(ctx context.Context, cfg *domain.PracticeConfig) error
+	HasActiveProvider(ctx context.Context) (bool, error)
 	DeleteProvider(ctx context.Context, id string) error
 
 	ListOperatories(ctx context.Context) ([]*domain.Operatory, error)

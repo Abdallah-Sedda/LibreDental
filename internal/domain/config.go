@@ -73,11 +73,16 @@ type Provider struct {
 	Email         string       `json:"email"`
 	Phone         string       `json:"phone"`
 	Color         string       `json:"color"`
-	Pin           string       `json:"pin,omitempty"`
-	IsActive      bool         `json:"is_active"`
-	HourlyRate    int64        `json:"hourly_rate"`
-	CreatedAt     time.Time    `json:"created_at"`
-	UpdatedAt     time.Time    `json:"updated_at"`
+	// Pin is a 4-digit convenience login for a single clinic's front desk, not a
+	// security boundary: it identifies who is acting so the audit log can attribute
+	// changes. It is stored in plaintext on purpose so logged-in staff can look up a
+	// forgotten PIN (see PracticeConfigService.GetProviderPin). Deployments that need
+	// real intra-system access control will need hashed credentials and roles instead.
+	Pin        string    `json:"pin,omitempty"`
+	IsActive   bool      `json:"is_active"`
+	HourlyRate int64     `json:"hourly_rate"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type OperatoryType string

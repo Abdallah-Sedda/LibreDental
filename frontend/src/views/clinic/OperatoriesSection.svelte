@@ -8,6 +8,7 @@
 
   let {
     operatories = [],
+    canEdit = false,
     openAddOperatoryModal,
     openEditOperatoryModal,
     handleDeleteOperatory,
@@ -20,6 +21,7 @@
     opIsActive = $bindable(true),
   } = $props<{
     operatories: Operatory[];
+    canEdit: boolean;
     openAddOperatoryModal: () => void;
     openEditOperatoryModal: (op: Operatory) => void;
     handleDeleteOperatory: (id: string) => void;
@@ -122,24 +124,26 @@
             </span>
           </div>
 
-          <div
-            class="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/60 text-xs"
-          >
-            <button
-              type="button"
-              onclick={() => openEditOperatoryModal(op)}
-              class="text-sky-400 hover:text-sky-300 font-semibold"
+          {#if canEdit}
+            <div
+              class="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/60 text-xs"
             >
-              {m.patients_btn_edit()}
-            </button>
-            <button
-              type="button"
-              onclick={() => handleDeleteOperatory(op.id)}
-              class="text-rose-400 hover:text-rose-300 font-semibold"
-            >
-              {m.common_disable()}
-            </button>
-          </div>
+              <button
+                type="button"
+                onclick={() => openEditOperatoryModal(op)}
+                class="text-sky-400 hover:text-sky-300 font-semibold"
+              >
+                {m.patients_btn_edit()}
+              </button>
+              <button
+                type="button"
+                onclick={() => handleDeleteOperatory(op.id)}
+                class="text-rose-400 hover:text-rose-300 font-semibold"
+              >
+                {m.common_disable()}
+              </button>
+            </div>
+          {/if}
         </div>
       {/each}
     </div>
