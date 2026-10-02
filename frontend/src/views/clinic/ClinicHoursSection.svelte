@@ -82,7 +82,7 @@
                     <span
                       class="bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1"
                     >
-                      <span>{brk.name || "Break"}:</span>
+                      <span>{brk.name || m.clinic_hours_break_default()}:</span>
                       <span class="font-semibold"
                         >{formatTime12(brk.start_time)} – {formatTime12(brk.end_time)}</span
                       >
@@ -126,6 +126,10 @@
                       <input
                         type="time"
                         bind:value={slot.open_time}
+                        aria-label={m.clinic_hours_aria_shift_opens({
+                          day: hour.day,
+                          shift: sIdx + 1,
+                        })}
                         onchange={() => syncDayBounds(hour)}
                         class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 focus:border-sky-500 focus:outline-none"
                       />
@@ -136,6 +140,10 @@
                       <input
                         type="time"
                         bind:value={slot.close_time}
+                        aria-label={m.clinic_hours_aria_shift_closes({
+                          day: hour.day,
+                          shift: sIdx + 1,
+                        })}
                         onchange={() => syncDayBounds(hour)}
                         class="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 focus:border-sky-500 focus:outline-none"
                       />
@@ -187,6 +195,10 @@
                         <input
                           type="text"
                           bind:value={brk.name}
+                          aria-label={m.clinic_hours_aria_break_label({
+                            day: hour.day,
+                            index: bIdx + 1,
+                          })}
                           placeholder={m.clinic_hours_label_placeholder()}
                           class="w-full rounded border border-amber-500/30 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 focus:border-amber-400 focus:outline-none"
                         />
@@ -199,6 +211,10 @@
                         <input
                           type="time"
                           bind:value={brk.start_time}
+                          aria-label={m.clinic_hours_aria_break_start({
+                            day: hour.day,
+                            index: bIdx + 1,
+                          })}
                           class="rounded border border-amber-500/30 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:border-amber-400 focus:outline-none"
                         />
                       </div>
@@ -209,6 +225,10 @@
                         <input
                           type="time"
                           bind:value={brk.end_time}
+                          aria-label={m.clinic_hours_aria_break_end({
+                            day: hour.day,
+                            index: bIdx + 1,
+                          })}
                           class="rounded border border-amber-500/30 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:border-amber-400 focus:outline-none"
                         />
                       </div>

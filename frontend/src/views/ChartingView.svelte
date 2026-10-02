@@ -171,6 +171,7 @@
   });
   let isCreatingClaim = $state(false);
   let claimNoticeMsg = $state("");
+  let claimErrorMsg = $state("");
 
   let requestGenCodes = 0;
   async function loadProcedureCodes() {
@@ -204,33 +205,36 @@
     const billable = currentChart.conditions.filter(
       (c) => c.status === "treatment_planned" || c.status === "completed"
     );
+    claimNoticeMsg = "";
+    claimErrorMsg = "";
     if (billable.length === 0) {
-      alert(m.charting_billing_no_conditions());
+      claimErrorMsg = m.charting_billing_no_conditions();
       return;
     }
 
+    // The patient selector stays usable while this runs; drop banners for a patient no
+    // longer on screen.
+    const patientId = selectedPatientId;
     isCreatingClaim = true;
-    claimNoticeMsg = "";
     try {
       const ids = billable.map((c) => c.id);
       const claim = await BillingService.CreateClaimFromChartConditions(
         auth.token,
-        selectedPatientId,
+        patientId,
         "",
         ids
       );
-      if (claim) {
+      if (claim && patientId === selectedPatientId) {
         claimNoticeMsg = m.charting_claim_created({ count: claim.line_items?.length || 0 });
-        await loadChart(selectedPatientId);
+        await loadChart(patientId);
       }
     } catch (e) {
       console.error("Failed to create claim from chart:", e);
+      if (patientId !== selectedPatientId) return;
       const msg = handleError(e, "");
-      alert(
-        msg.includes(CHART_NOTHING_TO_BILL)
-          ? m.charting_billing_all_billed()
-          : m.charting_billing_err_claim()
-      );
+      claimErrorMsg = msg.includes(CHART_NOTHING_TO_BILL)
+        ? m.charting_billing_all_billed()
+        : m.charting_billing_err_claim();
     } finally {
       isCreatingClaim = false;
     }
@@ -274,6 +278,9 @@
   }
 
   $effect(() => {
+    // Claim banners belong to the previously selected patient.
+    claimNoticeMsg = "";
+    claimErrorMsg = "";
     loadChart(selectedPatientId);
   });
 
@@ -512,6 +519,7 @@
       {currentToothSystem}
       {isCreatingClaim}
       bind:claimNoticeMsg
+      bind:claimErrorMsg
       {getToothLabel}
       {openEditCondition}
       handleDeleteCondition={promptDeleteCondition}

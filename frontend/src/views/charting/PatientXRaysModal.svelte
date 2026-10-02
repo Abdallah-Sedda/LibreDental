@@ -4,6 +4,7 @@
   import type { Document, DocumentFilter } from "@bindings/domain/models.js";
   import { DocumentType } from "@bindings/domain/models.js";
   import Modal from "../../components/ui/Modal.svelte";
+  import ConfirmModal from "../../components/ui/ConfirmModal.svelte";
   import * as m from "../../paraglide/messages.js";
   import { handleError } from "../../lib/error.js";
 
@@ -18,6 +19,9 @@
   // Upload state
   let isUploading = $state(false);
   let uploadError = $state("");
+  let viewerError = $state("");
+  let showConfirmDelete = $state(false);
+  let xrayToDelete = $state("");
   let docName = $state("");
   let selectedFile = $state<File | null>(null);
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -123,23 +127,33 @@
     }
   }
 
-  async function handleDelete(id: string) {
-    if (confirm(m.doc_confirm_delete_xray())) {
-      try {
-        await DocumentService.DeleteDocument(auth.token, id);
-        loadXRays();
-        if (viewingDocId === id) {
-          viewingImages = [];
-          viewingSkippedCount = 0;
-          viewingDocId = null;
-        }
-      } catch (err) {
-        console.error("Failed to delete X-Ray:", err);
+  function handleDelete(id: string) {
+    viewerError = "";
+    xrayToDelete = id;
+    showConfirmDelete = true;
+  }
+
+  async function executeDelete() {
+    const id = xrayToDelete;
+    if (!id) return;
+    try {
+      await DocumentService.DeleteDocument(auth.token, id);
+      loadXRays();
+      if (viewingDocId === id) {
+        viewingImages = [];
+        viewingSkippedCount = 0;
+        viewingDocId = null;
       }
+    } catch (err) {
+      console.error("Failed to delete X-Ray:", err);
+      viewerError = handleError(err, m.doc_err_delete());
+    } finally {
+      xrayToDelete = "";
     }
   }
 
   async function handleView(doc: Document) {
+    viewerError = "";
     try {
       const result = await DocumentService.GetDocumentImagesBase64(auth.token, doc.id);
       if (result && result.image_urls && result.image_urls.length > 0) {
@@ -152,7 +166,7 @@
       }
     } catch (err) {
       console.error("Failed to fetch image data:", err);
-      alert(m.doc_err_load_img());
+      viewerError = handleError(err, m.doc_err_load_img());
     }
   }
 
@@ -283,8 +297,9 @@
               <button
                 type="button"
                 onclick={() => handleDelete(doc.id)}
-                class="text-rose-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                class="text-rose-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1"
                 title={m.doc_btn_delete()}
+                aria-label={m.doc_btn_delete()}
               >
                 ✕
               </button>
@@ -295,70 +310,88 @@
     </div>
 
     <!-- Main Content: View Area -->
-    <div
-      class="col-span-2 flex flex-col bg-black/40 rounded-xl border border-slate-800 overflow-hidden relative"
-    >
-      {#if viewingImages.length > 0}
-        <div
-          class="absolute top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 z-10 flex items-start justify-between"
+    <div class="col-span-2 flex min-h-0 flex-col gap-2">
+      {#if viewerError}
+        <p
+          class="m-0 shrink-0 rounded-lg bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-400"
+          role="alert"
         >
-          <h3 class="text-white font-bold drop-shadow-md">{viewingImageName}</h3>
-          <button
-            type="button"
-            class="btn btn-primary text-xs py-1 px-3 shadow-md"
-            onclick={() => handleDownload(viewingDocId!, viewingImageName)}
-          >
-            {m.xray_btn_download()}
-          </button>
-        </div>
-
-        {#if viewingSkippedCount > 0}
-          <div class="absolute top-16 w-full flex justify-center z-10 px-4 pointer-events-none">
-            <div
-              class="bg-amber-500/90 text-black text-xs font-semibold rounded-lg px-3 py-1.5 shadow-md"
-            >
-              {m.xray_incomplete_series_warning({
-                skipped: viewingSkippedCount,
-                total: viewingTotalFrames,
-              })}
-            </div>
-          </div>
-        {/if}
-
-        <div class="flex-1 flex items-center justify-center overflow-hidden p-2">
-          <img
-            src={viewingImages[currentFrameIndex]}
-            alt={viewingImageName}
-            class="max-w-full max-h-full object-contain"
-          />
-        </div>
-
-        {#if viewingImages.length > 1}
+          {viewerError}
+        </p>
+      {/if}
+      <div
+        class="flex min-h-0 flex-1 flex-col bg-black/40 rounded-xl border border-slate-800 overflow-hidden relative"
+      >
+        {#if viewingImages.length > 0}
           <div
-            class="w-full bg-slate-900/80 border-t border-slate-800 p-3 flex flex-col gap-2 z-10 shrink-0"
+            class="absolute top-0 w-full bg-gradient-to-b from-black/80 to-transparent p-4 z-10 flex items-start justify-between"
           >
-            <div class="flex justify-between items-center text-xs text-slate-400 font-medium px-1">
-              <span
-                >{m.xray_frame_info({
-                  current: currentFrameIndex + 1,
-                  total: viewingImages.length,
-                })}</span
+            <h3 class="text-white font-bold drop-shadow-md">{viewingImageName}</h3>
+            <button
+              type="button"
+              class="btn btn-primary text-xs py-1 px-3 shadow-md"
+              onclick={() => handleDownload(viewingDocId!, viewingImageName)}
+            >
+              {m.xray_btn_download()}
+            </button>
+          </div>
+
+          {#if viewingSkippedCount > 0}
+            <div class="absolute top-16 w-full flex justify-center z-10 px-4 pointer-events-none">
+              <div
+                class="bg-amber-500/90 text-black text-xs font-semibold rounded-lg px-3 py-1.5 shadow-md"
               >
+                {m.xray_incomplete_series_warning({
+                  skipped: viewingSkippedCount,
+                  total: viewingTotalFrames,
+                })}
+              </div>
             </div>
-            <input
-              type="range"
-              min="0"
-              max={viewingImages.length - 1}
-              bind:value={currentFrameIndex}
-              class="w-full accent-sky-500 cursor-pointer"
+          {/if}
+
+          <div class="flex-1 flex items-center justify-center overflow-hidden p-2">
+            <img
+              src={viewingImages[currentFrameIndex]}
+              alt={viewingImageName}
+              class="max-w-full max-h-full object-contain"
             />
           </div>
+
+          {#if viewingImages.length > 1}
+            <div
+              class="w-full bg-slate-900/80 border-t border-slate-800 p-3 flex flex-col gap-2 z-10 shrink-0"
+            >
+              <div
+                class="flex justify-between items-center text-xs text-slate-400 font-medium px-1"
+              >
+                <span
+                  >{m.xray_frame_info({
+                    current: currentFrameIndex + 1,
+                    total: viewingImages.length,
+                  })}</span
+                >
+              </div>
+              <input
+                type="range"
+                min="0"
+                max={viewingImages.length - 1}
+                bind:value={currentFrameIndex}
+                class="w-full accent-sky-500 cursor-pointer"
+              />
+            </div>
+          {/if}
+        {:else}
+          <div class="flex-1 flex flex-col items-center justify-center text-slate-600 gap-3">
+            <p class="text-sm font-medium">{m.xray_select_prompt()}</p>
+          </div>
         {/if}
-      {:else}
-        <div class="flex-1 flex flex-col items-center justify-center text-slate-600 gap-3">
-          <p class="text-sm font-medium">{m.xray_select_prompt()}</p>
-        </div>
-      {/if}
+      </div>
     </div>
   </div>
 </Modal>
+
+<ConfirmModal
+  bind:showModal={showConfirmDelete}
+  message={m.doc_confirm_delete_xray()}
+  onConfirm={executeDelete}
+/>

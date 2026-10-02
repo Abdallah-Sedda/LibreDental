@@ -18,8 +18,10 @@
   import StatusBadge from "../../components/ui/StatusBadge.svelte";
   import EmptyState from "../../components/ui/EmptyState.svelte";
   import { m } from "../../paraglide/messages.js";
+  import { claimStatusLabel } from "$lib/labels.js";
   import { formatCurrency } from "$lib/currency.js";
   import ConfirmModal from "../../components/ui/ConfirmModal.svelte";
+  import { handleError } from "$lib/error.js";
 
   let {
     patients = [],
@@ -66,6 +68,9 @@
   let chartImportConditions = $state<ToothCondition[]>([]);
   let selectedImportConditionIds = $state<string[]>([]);
   let loadingChartImport = $state(false);
+
+  let claimsError = $state("");
+  let chartImportError = $state("");
 
   let submittingClaims = $state<Record<string, boolean>>({});
   let integrationProviders = $state<string[]>([]);
@@ -137,6 +142,7 @@
     claimLineItems = [];
     bundleLookupInput = "";
     bundleLookupError = "";
+    chartImportError = "";
     stampInsuranceFromPatient(claimPatientId);
     showClaimModal = true;
   }
@@ -175,6 +181,7 @@
     );
     bundleLookupInput = "";
     bundleLookupError = "";
+    chartImportError = "";
     showClaimModal = true;
   }
 
@@ -218,10 +225,10 @@
         claimLineItems = [...claimLineItems, ...newItems];
         bundleLookupInput = "";
       } else {
-        bundleLookupError = `No bundle found for shortname "${sn}"`;
+        bundleLookupError = m.billing_claim_bundle_not_found({ shortname: sn });
       }
     } catch {
-      bundleLookupError = `No bundle found for shortname "${sn}"`;
+      bundleLookupError = m.billing_claim_bundle_not_found({ shortname: sn });
     } finally {
       bundleLookupLoading = false;
     }
@@ -290,45 +297,42 @@
     }
   }
 
-  async function submitClaim(id: string) {
-    if (submittingClaims[id]) return;
-    if (!confirm(m.billing_claims_confirm_submit())) return;
+  let showConfirmSubmitClaim = $state(false);
+  let claimToSubmit = $state("");
+  let submitProvider = $state("");
 
+  function promptSubmitClaim(id: string) {
+    if (submittingClaims[id]) return;
+    claimsError = "";
+    if (integrationProviders.length === 0) {
+      claimsError = m.billing_claim_no_provider();
+      return;
+    }
+    claimToSubmit = id;
+    submitProvider = integrationProviders[0];
+    showConfirmSubmitClaim = true;
+  }
+
+  async function executeSubmitClaim() {
+    const id = claimToSubmit;
+    if (!id || !submitProvider) return;
     try {
       submittingClaims[id] = true;
-      const providersList = await BillingService.ListProviders();
-      if (!providersList || providersList.length === 0) {
-        alert(m.billing_claim_no_provider());
-        return;
-      }
-
-      let providerToUse = providersList[0];
-      if (providersList.length > 1) {
-        const choice = prompt(
-          `Available providers: ${providersList.join(", ")}\nEnter provider to use:`,
-          providersList[0]
-        );
-        if (!choice) return;
-        if (!providersList.includes(choice)) {
-          alert(m.billing_claim_invalid_provider());
-          return;
-        }
-        providerToUse = choice;
-      }
-
-      await BillingService.SubmitClaimToProvider(auth.token, id, providerToUse);
+      await BillingService.SubmitClaimToProvider(auth.token, id, submitProvider);
       await loadClaims();
     } catch (e) {
       console.error("Failed to submit claim:", e);
-      alert(m.billing_claim_submit_failed());
+      claimsError = handleError(e, m.billing_claim_submit_failed());
     } finally {
       submittingClaims[id] = false;
+      claimToSubmit = "";
     }
   }
 
   async function openChartImportModal() {
+    chartImportError = "";
     if (!claimPatientId) {
-      alert(m.billing_claim_err_patient());
+      chartImportError = m.billing_claim_err_patient();
       return;
     }
     loadingChartImport = true;
@@ -339,13 +343,13 @@
         (c) => c.status === "treatment_planned" || c.status === "completed"
       );
       if (chartImportConditions.length === 0) {
-        alert(m.billing_chart_import_empty());
+        chartImportError = m.billing_chart_import_empty();
         return;
       }
       showChartImportModal = true;
     } catch (e) {
       console.error("Failed to load chart conditions:", e);
-      alert(m.billing_claim_err_load_chart());
+      chartImportError = m.billing_claim_err_load_chart();
     } finally {
       loadingChartImport = false;
     }
@@ -361,7 +365,8 @@
           tooth_number: cond.tooth_number ?? null,
           surfaces: cond.surfaces,
           ada_code: cond.ada_code || "PROC",
-          description: cond.description || `Tooth #${cond.tooth_number} procedure`,
+          description:
+            cond.description || m.billing_claim_tooth_procedure({ tooth: cond.tooth_number }),
           fee: (cond.fee || 0) / 100,
           insurance_allowed: null,
         }) as any as ClaimLineItem
@@ -376,7 +381,10 @@
       integrationProviders = (await BillingService.ListProviders()) || [];
       for (const provider of integrationProviders) {
         try {
-          const config = (await BillingService.GetProviderConfig(provider)) as Record<string, any>;
+          const config = (await BillingService.GetProviderConfig(auth.token, provider)) as Record<
+            string,
+            any
+          >;
           if (config && config["api_key"]) {
             hasConfiguredProvider = true;
             break;
@@ -396,6 +404,7 @@
   <div class="flex items-center justify-between gap-4">
     <select
       bind:value={claimFilterPatient}
+      aria-label={m.appt_label_patient()}
       onchange={loadClaims}
       class="w-full max-w-xs rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
     >
@@ -413,6 +422,10 @@
     </button>
   </div>
 
+  {#if claimsError}
+    <p class="m-0 text-sm font-semibold text-rose-400" role="alert">{claimsError}</p>
+  {/if}
+
   {#if loadingClaims}
     <div class="p-8 text-center text-sm text-slate-400">{m.common_loading()}</div>
   {:else if claims.length === 0}
@@ -424,14 +437,14 @@
           class="bg-slate-900/80 border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-400"
         >
           <tr>
-            <th class="px-4 py-3">{m.billing_th_date()}</th>
-            <th class="px-4 py-3">{m.billing_th_patient()}</th>
-            <th class="px-4 py-3">{m.billing_th_provider()}</th>
-            <th class="px-4 py-3">{m.billing_th_carrier()}</th>
-            <th class="px-4 py-3">{m.billing_th_procedures()}</th>
-            <th class="px-4 py-3">{m.billing_th_total()}</th>
-            <th class="px-4 py-3">{m.billing_th_status()}</th>
-            <th class="px-4 py-3 text-right">{m.patients_th_actions()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_date()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_patient()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_provider()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_carrier()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_procedures()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_total()}</th>
+            <th scope="col" class="px-4 py-3">{m.billing_th_status()}</th>
+            <th scope="col" class="px-4 py-3 text-right">{m.patients_th_actions()}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800/60">
@@ -461,7 +474,7 @@
                 >{formatCurrency(claimTotal(c), countryMeta?.default_currency)}</td
               >
               <td class="px-4 py-3">
-                <StatusBadge variant={c.status} />
+                <StatusBadge variant={c.status} label={claimStatusLabel(c.status)} />
               </td>
               <td class="px-4 py-3 text-right">
                 <div class="flex items-center justify-end gap-1">
@@ -469,7 +482,7 @@
                     <button
                       type="button"
                       class="p-1.5 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      onclick={() => submitClaim(c.id)}
+                      onclick={() => promptSubmitClaim(c.id)}
                       title={!hasConfiguredProvider
                         ? m.billing_claim_submit_disabled_tooltip()
                         : m.billing_btn_submit_claim()}
@@ -536,8 +549,8 @@
 <!-- CLAIM MODAL -->
 <Modal
   bind:showModal={showClaimModal}
-  title={isEditingClaim ? "Edit Claim" : m.billing_btn_new_claim()}
-  subtitle="Configure claim details, insurance carrier policy numbers, and CDT line items"
+  title={isEditingClaim ? m.billing_claim_edit_title() : m.billing_btn_new_claim()}
+  subtitle={m.billing_claim_modal_subtitle()}
   maxWidth="max-w-4xl"
 >
   <form onsubmit={saveClaim} class="space-y-5">
@@ -562,7 +575,7 @@
           bind:value={claimProviderId}
           class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
         >
-          <option value="">— None —</option>
+          <option value="">{m.billing_pay_claim_none()}</option>
           {#each providers as pr}
             <option value={pr.id}>{pr.name}</option>
           {/each}
@@ -580,7 +593,7 @@
           id="cl-carrier"
           type="text"
           bind:value={claimInsuranceCarrier}
-          placeholder="e.g. Delta Dental"
+          placeholder={m.billing_claim_carrier_placeholder()}
           oninput={markInsuranceDirty}
         />
       </FormField>
@@ -612,7 +625,7 @@
           class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
         >
           {#each CLAIM_STATUSES as s}
-            <option value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            <option value={s}>{claimStatusLabel(s)}</option>
           {/each}
         </select>
       </FormField>
@@ -643,6 +656,7 @@
               type="text"
               class="w-36 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-mono text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
               bind:value={bundleLookupInput}
+              aria-label={m.billing_claim_bundle_placeholder()}
               placeholder={m.billing_claim_bundle_placeholder()}
               onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), applyBundleLookup())}
             />
@@ -652,17 +666,20 @@
               onclick={applyBundleLookup}
               disabled={bundleLookupLoading}
             >
-              {bundleLookupLoading ? "…" : "Apply"}
+              {bundleLookupLoading ? "…" : m.billing_claim_btn_apply_bundle()}
             </button>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick={addLineItem}>
-            + Add Row
+            {m.billing_claim_btn_add_row()}
           </button>
         </div>
       </div>
 
       {#if bundleLookupError}
         <p class="text-xs text-rose-400 m-0">{bundleLookupError}</p>
+      {/if}
+      {#if chartImportError}
+        <p class="text-xs text-rose-400 m-0" role="alert">{chartImportError}</p>
       {/if}
 
       {#if claimLineItems.length > 0}
@@ -674,7 +691,7 @@
             <span class="col-span-3">{m.charting_th_desc()}</span>
             <span class="col-span-1 text-center">{m.billing_claim_tooth_label()}</span>
             <span class="col-span-2 text-right">{m.charting_th_fee()}</span>
-            <span class="col-span-2 text-right">Ins. Allowed</span>
+            <span class="col-span-2 text-right">{m.billing_claim_th_ins_allowed()}</span>
             <span class="col-span-1 text-center"></span>
           </div>
           {#each claimLineItems as li, i}
@@ -682,6 +699,7 @@
               <div class="col-span-2">
                 <Input
                   bind:value={li.ada_code}
+                  aria-label={m.charting_th_code()}
                   placeholder={m.billing_claim_code_placeholder()}
                   class="font-mono text-xs py-1.5 px-2"
                 />
@@ -689,6 +707,7 @@
               <div class="col-span-3">
                 <Input
                   bind:value={li.description}
+                  aria-label={m.charting_th_desc()}
                   placeholder={m.charting_th_desc()}
                   class="text-xs py-1.5 px-2"
                 />
@@ -697,6 +716,7 @@
                 <Input
                   type="number"
                   bind:value={li.tooth_number}
+                  aria-label={m.billing_claim_tooth_label()}
                   min="1"
                   max="32"
                   placeholder="—"
@@ -707,6 +727,7 @@
                 <Input
                   type="number"
                   bind:value={li.fee}
+                  aria-label={m.charting_th_fee()}
                   step="0.01"
                   min="0"
                   placeholder="0.00"
@@ -717,6 +738,7 @@
                 <Input
                   type="number"
                   bind:value={li.insurance_allowed}
+                  aria-label={m.billing_claim_th_ins_allowed()}
                   step="0.01"
                   min="0"
                   placeholder="0.00"
@@ -728,13 +750,15 @@
                   type="button"
                   class="p-1 text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
                   onclick={() => removeLineItem(i)}
-                  title="Remove row">✕</button
+                  title={m.billing_claim_remove_row()}
+                  aria-label={m.billing_claim_remove_row()}>✕</button
                 >
               </div>
             </div>
           {/each}
           <div class="text-right text-xs text-slate-400 pt-2 border-t border-slate-800">
-            Total: <strong class="text-white text-sm font-mono"
+            {m.billing_claim_total()}
+            <strong class="text-white text-sm font-mono"
               >{formatCurrency(
                 claimLineItems.reduce((s, li) => s + Math.round((li.fee || 0) * 100), 0),
                 countryMeta?.default_currency
@@ -746,7 +770,7 @@
         <div
           class="p-6 text-center text-xs text-slate-500 bg-slate-900/50 rounded-xl border border-dashed border-slate-800"
         >
-          No line items added yet. Click '+ Add Row' or apply a bundle shortname above.
+          {m.billing_claim_no_line_items()}
         </div>
       {/if}
     </div>
@@ -806,7 +830,7 @@
               />
               <div>
                 <div class="font-bold text-slate-200">
-                  Tooth #{cond.tooth_number}
+                  {m.billing_claim_tooth_number({ tooth: cond.tooth_number ?? "" })}
                   {cond.surfaces?.length ? `(${cond.surfaces.join(", ")})` : ""}
                   <span class="ml-2 font-mono text-sky-400">[{cond.ada_code || "PROC"}]</span>
                 </div>
@@ -847,3 +871,26 @@
   message={m.billing_claims_confirm_delete()}
   onConfirm={executeDeleteClaim}
 />
+
+<ConfirmModal
+  bind:showModal={showConfirmSubmitClaim}
+  title={m.billing_btn_submit_claim()}
+  message={m.billing_claims_confirm_submit()}
+  confirmText={m.billing_btn_submit_claim()}
+  onConfirm={executeSubmitClaim}
+>
+  {#if integrationProviders.length > 1}
+    <label for="cl-submit-provider" class="mb-1 block text-xs font-semibold text-slate-400"
+      >{m.billing_claim_submit_provider_label()}</label
+    >
+    <select
+      id="cl-submit-provider"
+      bind:value={submitProvider}
+      class="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+    >
+      {#each integrationProviders as name}
+        <option value={name}>{name}</option>
+      {/each}
+    </select>
+  {/if}
+</ConfirmModal>

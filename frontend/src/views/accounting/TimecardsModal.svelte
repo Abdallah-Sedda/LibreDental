@@ -237,12 +237,12 @@
       <table class="w-full text-left text-sm">
         <thead>
           <tr class="border-b border-slate-800 text-slate-400">
-            <th class="py-2 font-medium">{m.timecard_th_date()}</th>
-            <th class="py-2 font-medium">{m.timecard_th_type()}</th>
-            <th class="py-2 font-medium">{m.timecard_th_hours()}</th>
-            <th class="py-2 font-medium">{m.timecard_th_pay()}</th>
-            <th class="py-2 font-medium">{m.timecard_th_status()}</th>
-            <th class="py-2 font-medium text-right">{m.timecard_th_actions()}</th>
+            <th scope="col" class="py-2 font-medium">{m.timecard_th_date()}</th>
+            <th scope="col" class="py-2 font-medium">{m.timecard_th_type()}</th>
+            <th scope="col" class="py-2 font-medium">{m.timecard_th_hours()}</th>
+            <th scope="col" class="py-2 font-medium">{m.timecard_th_pay()}</th>
+            <th scope="col" class="py-2 font-medium">{m.timecard_th_status()}</th>
+            <th scope="col" class="py-2 font-medium text-right">{m.timecard_th_actions()}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800/60">
@@ -288,14 +288,14 @@
                     onclick={() => handleSaveEdit(t)}
                     class="text-xs text-emerald-400 hover:text-emerald-300 font-semibold mr-2"
                   >
-                    Save
+                    {m.common_save()}
                   </button>
                   <button
                     type="button"
                     onclick={() => (editingId = null)}
                     class="text-xs text-slate-400 hover:text-white"
                   >
-                    Cancel
+                    {m.common_cancel()}
                   </button>
                 {:else}
                   <button
@@ -303,7 +303,7 @@
                     onclick={() => promptDelete(t.id)}
                     class="text-xs text-rose-400 hover:text-rose-300 font-semibold mr-2"
                   >
-                    Delete
+                    {m.common_delete()}
                   </button>
                   {#if !t.paid_at && t.clock_out}
                     <button
@@ -311,7 +311,7 @@
                       onclick={() => startEdit(t)}
                       class="text-xs text-sky-400 hover:text-sky-300 font-semibold"
                     >
-                      Edit
+                      {m.common_edit()}
                     </button>
                   {/if}
                 {/if}
@@ -329,7 +329,7 @@
       onclick={() => (showModal = false)}
       class="rounded-xl bg-slate-800 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition-colors"
     >
-      Close
+      {m.common_close()}
     </button>
   </div>
 </Modal>
