@@ -15,6 +15,10 @@ var (
 	// ErrLastActiveProvider is returned when an operation would leave the clinic
 	// with zero active providers, which is not allowed.
 	ErrLastActiveProvider = errors.New("cannot deactivate the last active provider")
+
+	// ErrAlreadyInitialized is returned when first-run bootstrap is attempted on a
+	// clinic that already has an active provider.
+	ErrAlreadyInitialized = errors.New("clinic already has an active provider")
 )
 
 // PatientRepository defines storage operations for patient demographic records.
@@ -48,6 +52,9 @@ type PracticeConfigRepository interface {
 
 	ListProviders(ctx context.Context) ([]*domain.Provider, error)
 	SaveProvider(ctx context.Context, provider *domain.Provider) error
+	CreateInitialProvider(ctx context.Context, provider *domain.Provider) error
+	SaveInitialConfig(ctx context.Context, cfg *domain.PracticeConfig) error
+	HasActiveProvider(ctx context.Context) (bool, error)
 	DeleteProvider(ctx context.Context, id string) error
 
 	ListOperatories(ctx context.Context) ([]*domain.Operatory, error)
@@ -123,4 +130,12 @@ type NotificationLogRepository interface {
 	Create(ctx context.Context, entry *domain.NotificationLog) error
 	List(ctx context.Context, patientID string, limit, offset int) ([]*domain.NotificationLog, error)
 	ListByAppointment(ctx context.Context, appointmentID string) ([]*domain.NotificationLog, error)
+}
+
+// ProgramBridgeRepository defines storage operations for local program bridge configuration.
+type ProgramBridgeRepository interface {
+	// Get returns ErrNotFound when the bridge has never been configured.
+	Get(ctx context.Context, name string) (*domain.BridgeConfig, error)
+	List(ctx context.Context) ([]*domain.BridgeConfig, error)
+	Save(ctx context.Context, cfg *domain.BridgeConfig) error
 }

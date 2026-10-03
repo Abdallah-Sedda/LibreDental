@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -26,20 +25,22 @@ func NewTimecardService(timecardRepo *sqlite.TimecardRepository, practiceConfigR
 	}
 }
 
-// logAction records an audit entry for the given session token. ClockIn/ClockOut
-// aren't gated behind staff login, so for those it's best-effort attribution rather
-// than an access check; every other caller here checks GetSessionUser first.
+// logAction records an audit entry for the given session token. Every caller checks
+// the session first, so this only fails if the session ends mid-request.
 func (s *TimecardService) logAction(token string, action domain.AuditAction, resource string, details string) {
 	if s.auditService == nil {
 		return
 	}
-	if err := s.auditService.LogAction(token, action, resource, details); err != nil && !errors.Is(err, ErrUnauthorized) {
+	if err := s.auditService.LogAction(token, action, resource, details); err != nil {
 		fmt.Printf("Warning: failed to log audit action: %v\n", err)
 	}
 }
 
 // ClockIn starts a new timecard for the given provider.
 func (s *TimecardService) ClockIn(token string, providerID string) (*domain.Timecard, error) {
+	if s.auditService != nil && s.auditService.GetSessionUser(token) == nil {
+		return nil, ErrUnauthorized
+	}
 	ctx := context.Background()
 
 	// Check if already clocked in
@@ -90,6 +91,9 @@ func (s *TimecardService) ClockIn(token string, providerID string) (*domain.Time
 
 // ClockOut ends the active timecard for the given provider.
 func (s *TimecardService) ClockOut(token string, providerID string) (*domain.Timecard, error) {
+	if s.auditService != nil && s.auditService.GetSessionUser(token) == nil {
+		return nil, ErrUnauthorized
+	}
 	ctx := context.Background()
 
 	active, err := s.timecardRepo.GetActiveTimecard(ctx, providerID)

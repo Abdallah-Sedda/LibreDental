@@ -33,3 +33,52 @@ export function operatoryTypeLabel(type?: string): string {
       return type || "";
   }
 }
+
+export function paymentMethodLabel(method?: string): string {
+  switch (method) {
+    case "cash":
+      return m.billing_method_cash();
+    case "check":
+      return m.billing_method_check();
+    case "credit_card":
+      return m.billing_method_credit_card();
+    case "insurance":
+      return m.billing_method_insurance();
+    case "write_off":
+      return m.billing_method_write_off();
+    default:
+      return method || "";
+  }
+}
+
+export function claimStatusLabel(status?: string): string {
+  switch (status) {
+    case "draft":
+      return m.billing_claim_status_draft();
+    case "submitted":
+      return m.billing_claim_status_submitted();
+    case "accepted":
+      return m.billing_claim_status_accepted();
+    case "rejected":
+      return m.billing_claim_status_rejected();
+    case "paid":
+      return m.billing_claim_status_paid();
+    default:
+      return status || "";
+  }
+}
+
+export function conditionStatusLabel(status?: string): string {
+  switch (status) {
+    case "treatment_planned":
+      return m.charting_modal_status_planned();
+    case "completed":
+      return m.charting_modal_status_completed();
+    case "existing":
+      return m.charting_modal_status_existing();
+    case "missing":
+      return m.charting_modal_status_missing();
+    default:
+      return status || "";
+  }
+}

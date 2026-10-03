@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Provider, Timecard } from "@bindings/domain/models.js";
-  import { TimecardService } from "@bindings/services/index.js";
+  import { TimecardService, PracticeConfigService } from "@bindings/services/index.js";
   import { untrack } from "svelte";
   import { auth } from "../../stores/auth.svelte.js";
   import Modal from "../../components/ui/Modal.svelte";
@@ -10,15 +10,18 @@
   import PhoneInput from "../../components/ui/PhoneInput.svelte";
   import EmptyState from "../../components/ui/EmptyState.svelte";
   import { m } from "../../paraglide/messages.js";
+  import { providerRoleLabel } from "$lib/labels.js";
 
   let {
     providers = [],
+    canEdit = false,
     openAddProviderModal,
     openEditProviderModal,
     handleDeleteProvider,
     handleSaveProvider,
     showProviderModal = $bindable(false),
     isEditingProvider = false,
+    provId = "",
     provName = $bindable(""),
     provRole = $bindable("dentist"),
     provSpecialty = $bindable(""),
@@ -31,12 +34,14 @@
     provHourlyRate = $bindable(0.0),
   } = $props<{
     providers: Provider[];
+    canEdit: boolean;
     openAddProviderModal: () => void;
     openEditProviderModal: (p: Provider) => void;
     handleDeleteProvider: (id: string) => void;
     handleSaveProvider: (e: Event) => void;
     showProviderModal: boolean;
     isEditingProvider: boolean;
+    provId: string;
     provName: string;
     provRole: string;
     provSpecialty: string;
@@ -52,6 +57,52 @@
   let activeTimecards = $state<Record<string, Timecard | null | undefined>>({});
   let inFlightAction = $state<Record<string, "clockIn" | "clockOut" | null>>({});
   let providerGen: Record<string, number> = {};
+
+  // PINs are a convenience login for attribution, not a security boundary (see
+  // domain.Provider.Pin), so signed-in staff can reveal them to look up a forgotten one.
+  let revealedPins = $state<Record<string, string>>({});
+  let showModalPin = $state(false);
+
+  // Re-hide PINs after a reload (a PIN may have changed) or when the user signs out.
+  $effect(() => {
+    void providers;
+    void canEdit;
+    untrack(() => (revealedPins = {}));
+  });
+
+  $effect(() => {
+    if (showProviderModal) showModalPin = false;
+  });
+
+  async function toggleCardPin(id: string) {
+    if (revealedPins[id] !== undefined) {
+      delete revealedPins[id];
+      return;
+    }
+    try {
+      revealedPins[id] = await PracticeConfigService.GetProviderPin(auth.token, id);
+    } catch (e) {
+      console.error("Failed to reveal PIN", e);
+    }
+  }
+
+  async function toggleModalPin() {
+    if (!showModalPin && provId && provPin === "****") {
+      const requestedId = provId;
+      try {
+        const pin = await PracticeConfigService.GetProviderPin(auth.token, requestedId);
+        // The modal may have closed or moved to another provider while this was in flight.
+        if (!showProviderModal || provId !== requestedId || provPin !== "****") return;
+        // Keep the mask for a provider with no stored PIN so the required field stays valid.
+        if (!pin) return;
+        provPin = pin;
+      } catch (e) {
+        console.error("Failed to reveal PIN", e);
+        return;
+      }
+    }
+    showModalPin = !showModalPin;
+  }
 
   let searchQuery = $state("");
   let statusFilter = $state("all"); // 'all', 'active', 'inactive'
@@ -152,6 +203,7 @@
       <input
         type="text"
         placeholder={m.prov_search_placeholder()}
+        aria-label={m.prov_search_placeholder()}
         class="box-border w-full rounded-xl border border-slate-700 bg-slate-900 py-2.5 text-sm text-white focus:border-sky-500 focus:outline-none shadow-sm transition-all"
         style="padding-left: 2.75rem; padding-right: 0.75rem;"
         bind:value={searchQuery}
@@ -202,7 +254,7 @@
               <div>
                 <h4 class="text-sm font-bold text-slate-100">{p.name}</h4>
                 <p class="text-xs text-sky-400 capitalize font-medium">
-                  {p.role}
+                  {providerRoleLabel(p.role)}
                   {p.specialty ? `• ${p.specialty}` : ""}
                 </p>
               </div>
@@ -235,72 +287,105 @@
               {#if p.pin}
                 <div class="flex items-center gap-2">
                   <span>{m.prov_pin_display_label()}</span>
-                  <span class="text-slate-500 font-mono tracking-widest">****</span>
+                  <span class="text-slate-500 font-mono tracking-widest"
+                    >{revealedPins[p.id] ?? "****"}</span
+                  >
+                  {#if canEdit}
+                    {@render pinToggle(revealedPins[p.id] !== undefined, () => toggleCardPin(p.id))}
+                  {/if}
                 </div>
               {/if}
             </div>
           {/if}
 
-          <div class="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
-            <div>
-              {#if inFlightAction[p.id] === "clockOut"}
+          {#if canEdit}
+            <div
+              class="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs"
+            >
+              <div>
+                {#if inFlightAction[p.id] === "clockOut"}
+                  <button
+                    type="button"
+                    disabled
+                    class="rounded bg-rose-500/20 text-rose-400 px-3 py-1 font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {m.prov_clocking_out()}
+                  </button>
+                {:else if inFlightAction[p.id] === "clockIn"}
+                  <button
+                    type="button"
+                    disabled
+                    class="rounded bg-emerald-500/20 text-emerald-400 px-3 py-1 font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {m.prov_clocking_in()}
+                  </button>
+                {:else if activeTimecards[p.id] === undefined}
+                  <span class="text-slate-500 font-semibold italic">{m.common_loading()}</span>
+                {:else if activeTimecards[p.id]}
+                  <button
+                    type="button"
+                    onclick={() => clockOut(p.id)}
+                    class="rounded bg-rose-500/20 text-rose-400 px-3 py-1 font-semibold hover:bg-rose-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {m.prov_clock_out()}
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => clockIn(p.id)}
+                    class="rounded bg-emerald-500/20 text-emerald-400 px-3 py-1 font-semibold hover:bg-emerald-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {m.prov_clock_in()}
+                  </button>
+                {/if}
+              </div>
+              <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  disabled
-                  class="rounded bg-rose-500/20 text-rose-400 px-3 py-1 font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onclick={() => openEditProviderModal(p)}
+                  class="text-sky-400 hover:text-sky-300 font-semibold"
                 >
-                  {m.prov_clocking_out()}
+                  {m.patients_btn_edit()}
                 </button>
-              {:else if inFlightAction[p.id] === "clockIn"}
                 <button
                   type="button"
-                  disabled
-                  class="rounded bg-emerald-500/20 text-emerald-400 px-3 py-1 font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onclick={() => handleDeleteProvider(p.id)}
+                  class="text-rose-400 hover:text-rose-300 font-semibold"
                 >
-                  {m.prov_clocking_in()}
+                  {m.common_disable()}
                 </button>
-              {:else if activeTimecards[p.id] === undefined}
-                <span class="text-slate-500 font-semibold italic">{m.common_loading()}</span>
-              {:else if activeTimecards[p.id]}
-                <button
-                  type="button"
-                  onclick={() => clockOut(p.id)}
-                  class="rounded bg-rose-500/20 text-rose-400 px-3 py-1 font-semibold hover:bg-rose-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {m.prov_clock_out()}
-                </button>
-              {:else}
-                <button
-                  type="button"
-                  onclick={() => clockIn(p.id)}
-                  class="rounded bg-emerald-500/20 text-emerald-400 px-3 py-1 font-semibold hover:bg-emerald-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {m.prov_clock_in()}
-                </button>
-              {/if}
+              </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                onclick={() => openEditProviderModal(p)}
-                class="text-sky-400 hover:text-sky-300 font-semibold"
-              >
-                {m.patients_btn_edit()}
-              </button>
-              <button
-                type="button"
-                onclick={() => handleDeleteProvider(p.id)}
-                class="text-rose-400 hover:text-rose-300 font-semibold"
-              >
-                {m.common_disable()}
-              </button>
-            </div>
-          </div>
+          {/if}
         </div>
       {/each}
     </div>
   {/if}
 </div>
+
+{#snippet pinToggle(visible: boolean, onclick: () => void)}
+  <button
+    type="button"
+    {onclick}
+    aria-label={visible ? m.common_hide() : m.common_reveal()}
+    title={visible ? m.common_hide() : m.common_reveal()}
+    class="text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+  >
+    {#if visible}
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </svg>
+    {:else}
+      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    {/if}
+  </button>
+{/snippet}
 
 <!-- PROVIDER MODAL -->
 <Modal
@@ -363,7 +448,11 @@
       </FormField>
 
       <FormField label={m.prov_phone_label()} forId="prov-phone">
-        <PhoneInput id="prov-phone" bind:value={provPhone} placeholder="555-019-2834" />
+        <PhoneInput
+          id="prov-phone"
+          bind:value={provPhone}
+          placeholder={m.prov_phone_placeholder()}
+        />
       </FormField>
     </div>
 
@@ -380,17 +469,23 @@
       </FormField>
 
       <FormField label={m.prov_pin_label()} forId="prov-pin" required>
-        <Input
-          id="prov-pin"
-          type="password"
-          bind:value={provPin}
-          placeholder={m.prov_pin_placeholder()}
-          pattern="[0-9]*"
-          inputmode="numeric"
-          maxlength={4}
-          minlength={4}
-          required
-        />
+        <div class="relative">
+          <Input
+            id="prov-pin"
+            type={showModalPin ? "text" : "password"}
+            bind:value={provPin}
+            placeholder={m.prov_pin_placeholder()}
+            pattern="[0-9]*"
+            inputmode="numeric"
+            maxlength={4}
+            minlength={4}
+            required
+            class="pr-9"
+          />
+          <div class="absolute right-2.5 top-1/2 -translate-y-1/2 flex">
+            {@render pinToggle(showModalPin, toggleModalPin)}
+          </div>
+        </div>
       </FormField>
     </div>
 

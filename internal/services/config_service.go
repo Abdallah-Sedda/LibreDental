@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/LibreDental/libredental/internal/domain"
@@ -15,21 +16,28 @@ type PracticeConfigService struct {
 	auditService *AuditService
 }
 
+var pinPattern = regexp.MustCompile(`^[0-9]{4}$`)
+
 // NewPracticeConfigService constructs the service. auditService may be nil (e.g. the
 // internal instance AuditService itself uses for PIN verification during login, before
-// any session exists) — mutations still succeed without it, they just aren't audit-logged.
+// any session exists) — mutations then skip the session check and aren't audit-logged.
 func NewPracticeConfigService(repo storage.PracticeConfigRepository, auditService *AuditService) *PracticeConfigService {
 	return &PracticeConfigService{repo: repo, auditService: auditService}
 }
 
-// logAction records an audit entry when a session is available. Staff login isn't
-// required to manage practice/staff config in this app (see SetConfig's bootstrap use
-// before any provider exists), so this is best-effort attribution, not an access check.
+func (s *PracticeConfigService) requireSession(token string) error {
+	if s.auditService != nil && s.auditService.GetSessionUser(token) == nil {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
 func (s *PracticeConfigService) logAction(token string, action domain.AuditAction, resource string, details string) {
 	if s.auditService == nil {
 		return
 	}
-	if err := s.auditService.LogAction(token, action, resource, details); err != nil {
+	// SetConfig's first-run call has no session to attribute, so ErrUnauthorized is expected there.
+	if err := s.auditService.LogAction(token, action, resource, details); err != nil && !errors.Is(err, ErrUnauthorized) {
 		fmt.Printf("Warning: failed to log audit action: %v\n", err)
 	}
 }
@@ -47,9 +55,15 @@ func (s *PracticeConfigService) GetConfig() (*domain.PracticeConfig, error) {
 }
 
 // SetConfig initializes or updates the practice country and derives all regional defaults.
-// Called during first-run onboarding, before any provider/staff account exists yet, so it
-// cannot require an authenticated session.
+// It runs as step one of first-run onboarding, before any provider exists, so a session is
+// only required once the clinic has an active provider who could have logged in.
 func (s *PracticeConfigService) SetConfig(token string, countryCode string) (*domain.PracticeConfig, error) {
+	save := s.repo.Save
+	if s.requireSession(token) != nil {
+		// The repo checks for an active provider in the same statement as the write.
+		save = s.repo.SaveInitialConfig
+	}
+
 	meta, err := s.GetCountryConfig(countryCode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch country config for %s: %w", countryCode, err)
@@ -66,7 +80,10 @@ func (s *PracticeConfigService) SetConfig(token string, countryCode string) (*do
 		action = domain.AuditActionCreate
 	}
 
-	if err := s.repo.Save(context.Background(), cfg); err != nil {
+	if err := save(context.Background(), cfg); err != nil {
+		if errors.Is(err, storage.ErrAlreadyInitialized) {
+			return nil, ErrUnauthorized
+		}
 		return nil, fmt.Errorf("failed to save practice config: %w", err)
 	}
 	s.logAction(token, action, "practice_config", "Set practice config during onboarding")
@@ -97,6 +114,9 @@ func (s *PracticeConfigService) GetCountryConfig(countryCode string) (*domain.Co
 
 // UpdatePracticeConfig updates practice details and regional configuration.
 func (s *PracticeConfigService) UpdatePracticeConfig(token string, cfg domain.PracticeConfig) (*domain.PracticeConfig, error) {
+	if err := s.requireSession(token); err != nil {
+		return nil, err
+	}
 	err := s.repo.Save(context.Background(), &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update practice config: %w", err)
@@ -131,6 +151,26 @@ func (s *PracticeConfigService) VerifyProviderPin(id string, pin string) (*domai
 	return nil, errors.New("provider not found")
 }
 
+// GetProviderPin returns a provider's PIN so logged-in staff can look up a forgotten
+// one. PINs are attribution for the audit log rather than a security boundary (see
+// domain.Provider.Pin), but every reveal is still audit-logged.
+func (s *PracticeConfigService) GetProviderPin(token string, id string) (string, error) {
+	if err := s.requireSession(token); err != nil {
+		return "", err
+	}
+	providers, err := s.repo.ListProviders(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("failed to list providers: %w", err)
+	}
+	for _, p := range providers {
+		if p.ID == id {
+			s.logAction(token, domain.AuditActionRead, "provider", fmt.Sprintf("Revealed PIN for provider %s", id))
+			return p.Pin, nil
+		}
+	}
+	return "", storage.ErrNotFound
+}
+
 func (s *PracticeConfigService) ListProviders() ([]*domain.Provider, error) {
 	providers, err := s.repo.ListProviders(context.Background())
 	if err != nil {
@@ -142,9 +182,53 @@ func (s *PracticeConfigService) ListProviders() ([]*domain.Provider, error) {
 	return providers, nil
 }
 
-// SaveProvider creates or updates a clinic provider/staff member. Not gated behind a
-// session: creating the very first provider happens before any session can exist.
+// NeedsInitialProvider reports whether first-run onboarding still has to create the
+// clinic's first provider.
+func (s *PracticeConfigService) NeedsInitialProvider() (bool, error) {
+	hasProvider, err := s.repo.HasActiveProvider(context.Background())
+	if err != nil {
+		return false, err
+	}
+	return !hasProvider, nil
+}
+
+// CreateInitialProvider is the only way to create a provider without a session: it
+// succeeds only while the clinic has no active provider, then logs in as the new
+// provider and returns the session token so the creation is attributed in the audit log.
+func (s *PracticeConfigService) CreateInitialProvider(p domain.Provider) (string, error) {
+	if s.auditService == nil {
+		return "", errors.New("audit service not configured")
+	}
+	if p.Name == "" {
+		return "", fmt.Errorf("%w: provider name is required", storage.ErrInvalidInput)
+	}
+	if !pinPattern.MatchString(p.Pin) {
+		return "", fmt.Errorf("%w: pin must be exactly 4 digits", storage.ErrInvalidInput)
+	}
+	if p.Role == "" {
+		p.Role = domain.RoleDentist
+	}
+	if p.ID == "" {
+		p.ID = fmt.Sprintf("prov_%d", time.Now().UnixNano())
+	}
+
+	if err := s.repo.CreateInitialProvider(context.Background(), &p); err != nil {
+		return "", err
+	}
+
+	token, err := s.auditService.CreateSession(p.ID, p.Pin)
+	if err != nil {
+		return "", fmt.Errorf("failed to open session for initial provider: %w", err)
+	}
+	s.logAction(token, domain.AuditActionCreate, "provider", fmt.Sprintf("Created initial provider %s during onboarding", p.ID))
+	return token, nil
+}
+
+// SaveProvider creates or updates a clinic provider/staff member.
 func (s *PracticeConfigService) SaveProvider(token string, p domain.Provider) (*domain.Provider, error) {
+	if err := s.requireSession(token); err != nil {
+		return nil, err
+	}
 	isNew := p.ID == ""
 	if p.ID == "" {
 		p.ID = fmt.Sprintf("prov_%d", time.Now().UnixNano())
@@ -190,6 +274,9 @@ func (s *PracticeConfigService) SaveProvider(token string, p domain.Provider) (*
 // The check-then-deactivate logic lives in the repository as a single atomic
 // operation, so concurrent deletes of different providers can't race past it.
 func (s *PracticeConfigService) DeleteProvider(token string, id string) error {
+	if err := s.requireSession(token); err != nil {
+		return err
+	}
 	if err := s.repo.DeleteProvider(context.Background(), id); err != nil {
 		return err
 	}
@@ -204,6 +291,9 @@ func (s *PracticeConfigService) ListOperatories() ([]*domain.Operatory, error) {
 
 // SaveOperatory creates or updates a clinic operatory/room.
 func (s *PracticeConfigService) SaveOperatory(token string, op domain.Operatory) (*domain.Operatory, error) {
+	if err := s.requireSession(token); err != nil {
+		return nil, err
+	}
 	isNew := op.ID == ""
 	if op.ID == "" {
 		op.ID = fmt.Sprintf("op_%d", time.Now().UnixNano())
@@ -222,6 +312,9 @@ func (s *PracticeConfigService) SaveOperatory(token string, op domain.Operatory)
 
 // DeleteOperatory removes an operatory record by ID.
 func (s *PracticeConfigService) DeleteOperatory(token string, id string) error {
+	if err := s.requireSession(token); err != nil {
+		return err
+	}
 	if err := s.repo.DeleteOperatory(context.Background(), id); err != nil {
 		return err
 	}

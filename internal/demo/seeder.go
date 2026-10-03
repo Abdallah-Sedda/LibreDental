@@ -38,17 +38,21 @@ func SeedDatabase(db *sqlite.DB, auditDb *sqlite.DB, appDir, demoDataDir string)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 	today := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
 
-	// 1. Practice config
-	if err := seedPracticeConfig(graph, now, summary); err != nil {
+	// 1. Onboarding: set the practice country, then create the very first provider
+	// (both unauthenticated, exactly as a fresh install's onboarding flow would),
+	// which opens a session. Every subsequent step authenticates with that session
+	// token, the same way a logged-in staff member's requests would.
+	cfg, err := initPracticeConfig(graph)
+	if err != nil {
+		return nil, err
+	}
+	token, err := bootstrapFirstProvider(graph, now, summary)
+	if err != nil {
 		return nil, err
 	}
 
-	// 2. Bootstrap: create the very first provider (unauthenticated, exactly as a
-	// fresh install's onboarding flow would) and immediately use it to open a
-	// session. Every subsequent step authenticates with that session token, the
-	// same way a logged-in staff member's requests would.
-	token, err := bootstrapFirstProvider(graph, now, summary)
-	if err != nil {
+	// 2. Practice profile
+	if err := seedPracticeConfig(graph, token, cfg, now, summary); err != nil {
 		return nil, err
 	}
 

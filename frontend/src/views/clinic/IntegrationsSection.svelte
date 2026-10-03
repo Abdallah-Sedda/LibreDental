@@ -4,10 +4,12 @@
   import { m } from "../../paraglide/messages.js";
   import { auth } from "../../stores/auth.svelte.js";
 
+  let { canEdit = false } = $props<{ canEdit: boolean }>();
+
   // Generic list-providers / get-config / set-config panel state, parameterized by which
   // Wails service backs it (BillingService for claims clearinghouses, NotificationService
   // for email/SMS/voice vendors), both backed by SecretsService on the Go side.
-  // NotificationService's config methods require a session token, so it is adapted below.
+  // Both services' config methods require a session token, so each is adapted below.
   type ProviderConfig = { [key: string]: string | undefined } | null;
   type ProviderConfigService = {
     ListProviders(): Promise<string[] | null>;
@@ -25,6 +27,7 @@
     let providerConfigError = $state(false);
     let providerFullConfig = $state<{ [key: string]: string | undefined }>({});
     let isLoadingConfig = $state(false);
+    let saveStatus = $state<{ ok: boolean; msg: string } | null>(null);
 
     async function loadProviders() {
       providersLoadError = false;
@@ -40,6 +43,7 @@
     }
 
     async function loadProviderConfig() {
+      saveStatus = null;
       providerConfigError = false;
       providerFullConfig = {};
       providerApiKey = "";
@@ -66,17 +70,23 @@
     }
 
     async function saveProviderConfig() {
-      if (!selectedProvider || providerConfigError) return;
+      if (!canEdit || !selectedProvider || providerConfigError) return;
       isSavingConfig = true;
+      saveStatus = null;
+      const reqProvider = selectedProvider;
       try {
-        await service.SetProviderConfig(selectedProvider, {
+        await service.SetProviderConfig(reqProvider, {
           ...providerFullConfig,
           api_key: providerApiKey,
         });
-        alert(m.integrations_save_success());
+        if (reqProvider === selectedProvider) {
+          saveStatus = { ok: true, msg: m.integrations_save_success() };
+        }
       } catch (e) {
         console.error("Failed to save provider config:", e);
-        alert(m.integrations_save_error());
+        if (reqProvider === selectedProvider) {
+          saveStatus = { ok: false, msg: m.integrations_save_error() };
+        }
       } finally {
         isSavingConfig = false;
       }
@@ -113,13 +123,20 @@
       get providerConfigError() {
         return providerConfigError;
       },
+      get saveStatus() {
+        return saveStatus;
+      },
       loadProviders,
       loadProviderConfig,
       saveProviderConfig,
     };
   }
 
-  const claimsPanel = createProviderPanel(BillingService);
+  const claimsPanel = createProviderPanel({
+    ListProviders: () => BillingService.ListProviders(),
+    GetProviderConfig: (name) => BillingService.GetProviderConfig(auth.token, name),
+    SetProviderConfig: (name, config) => BillingService.SetProviderConfig(auth.token, name, config),
+  });
   const notificationsPanel = createProviderPanel({
     ListProviders: () => NotificationService.ListProviders(),
     GetProviderConfig: (name) => NotificationService.GetProviderConfig(auth.token, name),
@@ -180,17 +197,27 @@
                 id="claims-provider-api-key"
                 bind:value={claimsPanel.providerApiKey}
                 placeholder={m.integrations_placeholder_api_key()}
-                disabled={!claimsPanel.selectedProvider || claimsPanel.isLoadingConfig}
+                disabled={!canEdit || !claimsPanel.selectedProvider || claimsPanel.isLoadingConfig}
                 class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none disabled:opacity-50"
               />
             </div>
           </div>
 
-          <div class="flex justify-end">
+          <div class="flex items-center justify-end gap-3">
+            {#if claimsPanel.saveStatus}
+              <span
+                class="text-xs font-semibold {claimsPanel.saveStatus.ok
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'}"
+                role={claimsPanel.saveStatus.ok ? "status" : "alert"}
+                >{claimsPanel.saveStatus.msg}</span
+              >
+            {/if}
             <button
               type="button"
               class="btn btn-secondary btn-sm bg-slate-800 text-white border-slate-700 hover:bg-slate-700 px-4 py-1 rounded-md text-xs cursor-pointer"
-              disabled={!claimsPanel.selectedProvider ||
+              disabled={!canEdit ||
+                !claimsPanel.selectedProvider ||
                 claimsPanel.isSavingConfig ||
                 claimsPanel.isLoadingConfig ||
                 claimsPanel.providerConfigError}
@@ -243,18 +270,29 @@
                 id="notification-provider-api-key"
                 bind:value={notificationsPanel.providerApiKey}
                 placeholder={m.integrations_placeholder_api_key()}
-                disabled={!notificationsPanel.selectedProvider ||
+                disabled={!canEdit ||
+                  !notificationsPanel.selectedProvider ||
                   notificationsPanel.isLoadingConfig}
                 class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none disabled:opacity-50"
               />
             </div>
           </div>
 
-          <div class="flex justify-end">
+          <div class="flex items-center justify-end gap-3">
+            {#if notificationsPanel.saveStatus}
+              <span
+                class="text-xs font-semibold {notificationsPanel.saveStatus.ok
+                  ? 'text-emerald-400'
+                  : 'text-rose-400'}"
+                role={notificationsPanel.saveStatus.ok ? "status" : "alert"}
+                >{notificationsPanel.saveStatus.msg}</span
+              >
+            {/if}
             <button
               type="button"
               class="btn btn-secondary btn-sm bg-slate-800 text-white border-slate-700 hover:bg-slate-700 px-4 py-1 rounded-md text-xs cursor-pointer"
-              disabled={!notificationsPanel.selectedProvider ||
+              disabled={!canEdit ||
+                !notificationsPanel.selectedProvider ||
                 notificationsPanel.isSavingConfig ||
                 notificationsPanel.isLoadingConfig ||
                 notificationsPanel.providerConfigError}

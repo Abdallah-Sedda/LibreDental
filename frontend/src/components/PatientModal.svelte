@@ -7,6 +7,7 @@
   import PhoneInput from "./ui/PhoneInput.svelte";
   import IdInput from "./ui/IdInput.svelte";
   import { m } from "../paraglide/messages.js";
+  import { providerRoleLabel } from "$lib/labels.js";
   import { getLocaleVersion } from "$lib/locale.svelte.js";
 
   let {
@@ -107,6 +108,15 @@
     getLocaleVersion();
     return m.patient_modal_subtitle();
   });
+
+  const emailPlaceholder = $derived.by(() => {
+    getLocaleVersion();
+    return m.patient_placeholder_email();
+  });
+  const addr1Placeholder = $derived.by(() => {
+    getLocaleVersion();
+    return m.patient_placeholder_addr1();
+  });
 </script>
 
 <Modal
@@ -186,7 +196,10 @@
           >
             <option value="">{m.patient_provider_unassigned()}</option>
             {#each configuredProviders as prov}
-              <option value={prov.id}>{prov.name} ({prov.specialty || prov.role})</option>
+              <option value={prov.id}
+                >{prov.name} ({prov.specialty ||
+                  (getLocaleVersion(), providerRoleLabel(prov.role))})</option
+              >
             {/each}
           </select>
         </FormField>
@@ -212,7 +225,7 @@
         </FormField>
 
         <FormField label={m.patient_email()} forId="email">
-          <EmailInput id="email" bind:value={email} placeholder="jane.smith@example.com" />
+          <EmailInput id="email" bind:value={email} placeholder={emailPlaceholder} />
         </FormField>
 
         <div class="sm:col-span-2">
@@ -221,7 +234,7 @@
               id="addr1"
               type="text"
               bind:value={addressLine1}
-              placeholder="742 Evergreen Terrace"
+              placeholder={addr1Placeholder}
             />
           </FormField>
         </div>

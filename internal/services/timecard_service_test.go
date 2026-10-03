@@ -2,6 +2,7 @@ package services_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -106,4 +107,54 @@ func TestTimecardService_ValidationAndErrors(t *testing.T) {
 			t.Errorf("Expected success for valid manual timecard, got %v", err)
 		}
 	})
+}
+
+func TestTimecardService_ClockRequiresSession(t *testing.T) {
+	tempDir := t.TempDir()
+
+	db, err := sqlite.Open(filepath.Join(tempDir, "main.db"))
+	if err != nil {
+		t.Fatalf("Failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	auditDb, err := sqlite.OpenAudit(filepath.Join(tempDir, "audit.db"))
+	if err != nil {
+		t.Fatalf("Failed to open audit sqlite db: %v", err)
+	}
+	defer auditDb.Close()
+
+	configRepo := sqlite.NewPracticeConfigRepository(db)
+	auditService := services.NewAuditService(sqlite.NewAuditRepository(auditDb), configRepo)
+	service := services.NewTimecardService(sqlite.NewTimecardRepository(db), configRepo, auditService)
+
+	if err := configRepo.SaveProvider(context.Background(), &domain.Provider{
+		ID: "prov_clock", Name: "Dr. Clock", Role: domain.RoleDentist, Pin: "1234", IsActive: true,
+	}); err != nil {
+		t.Fatalf("Failed to save provider: %v", err)
+	}
+
+	if _, err := service.ClockIn("", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockIn without session to be unauthorized, got %v", err)
+	}
+	if _, err := service.ClockOut("", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockOut without session to be unauthorized, got %v", err)
+	}
+	if _, err := service.ClockIn("unknown-token", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockIn with unknown token to be unauthorized, got %v", err)
+	}
+	if _, err := service.ClockOut("unknown-token", "prov_clock"); !errors.Is(err, services.ErrUnauthorized) {
+		t.Fatalf("Expected ClockOut with unknown token to be unauthorized, got %v", err)
+	}
+
+	token, err := auditService.CreateSession("prov_clock", "1234")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	if _, err := service.ClockIn(token, "prov_clock"); err != nil {
+		t.Fatalf("Expected ClockIn with session to succeed, got %v", err)
+	}
+	if _, err := service.ClockOut(token, "prov_clock"); err != nil {
+		t.Fatalf("Expected ClockOut with session to succeed, got %v", err)
+	}
 }

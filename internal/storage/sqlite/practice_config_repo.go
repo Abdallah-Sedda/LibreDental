@@ -76,6 +76,25 @@ func (r *PracticeConfigRepository) Get(ctx context.Context) (*domain.PracticeCon
 }
 
 func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.PracticeConfig) error {
+	_, err := r.save(ctx, cfg, false)
+	return err
+}
+
+// SaveInitialConfig saves the practice config only while the clinic has no active
+// provider. The check and the write are one statement so a sessionless first-run save
+// can't land after another client has already created the first provider.
+func (r *PracticeConfigRepository) SaveInitialConfig(ctx context.Context, cfg *domain.PracticeConfig) error {
+	rows, err := r.save(ctx, cfg, true)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return storage.ErrAlreadyInitialized
+	}
+	return nil
+}
+
+func (r *PracticeConfigRepository) save(ctx context.Context, cfg *domain.PracticeConfig, onlyWithoutProvider bool) (int64, error) {
 	now := time.Now().UTC()
 	if cfg.CreatedAt.IsZero() {
 		cfg.CreatedAt = now
@@ -89,7 +108,13 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 
 	hoursJSON, err := json.Marshal(cfg.BusinessHours)
 	if err != nil {
-		return fmt.Errorf("failed to marshal business hours: %w", err)
+		return 0, fmt.Errorf("failed to marshal business hours: %w", err)
+	}
+
+	source := `VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if onlyWithoutProvider {
+		source = `SELECT 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+	WHERE NOT EXISTS (SELECT 1 FROM providers WHERE is_active = 1)`
 	}
 
 	query := `
@@ -98,7 +123,7 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		address_line1, address_line2, city, state_province, postal_code,
 		country_code, currency, tooth_system, date_format, business_hours,
 		created_at, updated_at
-	) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) ` + source + `
 	ON CONFLICT(id) DO UPDATE SET
 		clinic_name = excluded.clinic_name,
 		tagline = excluded.tagline,
@@ -119,7 +144,7 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		business_hours = excluded.business_hours,
 		updated_at = excluded.updated_at`
 
-	_, err = r.db.ExecContext(
+	res, err := r.db.ExecContext(
 		ctx, query,
 		cfg.ClinicName, cfg.Tagline, cfg.TaxID, cfg.LicenseNumber, cfg.Phone, cfg.Email, cfg.Website,
 		cfg.AddressLine1, cfg.AddressLine2, cfg.City, cfg.StateProvince, cfg.PostalCode,
@@ -127,10 +152,13 @@ func (r *PracticeConfigRepository) Save(ctx context.Context, cfg *domain.Practic
 		cfg.CreatedAt, cfg.UpdatedAt,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to save practice config: %w", err)
+		return 0, fmt.Errorf("failed to save practice config: %w", err)
 	}
-
-	return nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to check practice config save result: %w", err)
+	}
+	return rows, nil
 }
 
 // Providers CRUD
@@ -199,9 +227,14 @@ func (r *PracticeConfigRepository) SaveProvider(ctx context.Context, p *domain.P
 		pin = excluded.pin,
 		is_active = excluded.is_active,
 		hourly_rate = excluded.hourly_rate,
-		updated_at = excluded.updated_at`
+		updated_at = excluded.updated_at
+	WHERE excluded.is_active = 1
+	   OR providers.is_active = 0
+	   OR (SELECT COUNT(*) FROM providers WHERE is_active = 1) > 1`
 
-	_, err := r.db.ExecContext(
+	// The WHERE on the upsert applies the same last-active guard as DeleteProvider, so
+	// editing the only active provider to inactive can't leave the clinic with no login.
+	res, err := r.db.ExecContext(
 		ctx, query,
 		p.ID, p.Name, p.Role, p.Specialty, p.LicenseNumber,
 		p.Email, p.Phone, p.Color, p.Pin, isActiveInt, p.HourlyRate, p.CreatedAt, p.UpdatedAt,
@@ -209,8 +242,61 @@ func (r *PracticeConfigRepository) SaveProvider(ctx context.Context, p *domain.P
 	if err != nil {
 		return fmt.Errorf("failed to save provider: %w", err)
 	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check save result: %w", err)
+	}
+	if rows == 0 {
+		return storage.ErrLastActiveProvider
+	}
 
 	return nil
+}
+
+// CreateInitialProvider inserts the clinic's first provider only if no active provider
+// exists yet. The existence check and insert are one statement so two clients running
+// first-run onboarding at the same time can't both bootstrap an account.
+func (r *PracticeConfigRepository) CreateInitialProvider(ctx context.Context, p *domain.Provider) error {
+	now := time.Now().UTC()
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = now
+	}
+	p.UpdatedAt = now
+	p.IsActive = true
+
+	query := `
+	INSERT INTO providers (
+		id, name, role, specialty, license_number, email, phone, color, pin, is_active, hourly_rate, created_at, updated_at
+	)
+	SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?
+	WHERE NOT EXISTS (SELECT 1 FROM providers WHERE is_active = 1)`
+
+	res, err := r.db.ExecContext(
+		ctx, query,
+		p.ID, p.Name, p.Role, p.Specialty, p.LicenseNumber,
+		p.Email, p.Phone, p.Color, p.Pin, p.HourlyRate, p.CreatedAt, p.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create initial provider: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check initial provider result: %w", err)
+	}
+	if rows == 0 {
+		return storage.ErrAlreadyInitialized
+	}
+	return nil
+}
+
+// HasActiveProvider reports whether at least one active provider exists.
+func (r *PracticeConfigRepository) HasActiveProvider(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM providers WHERE is_active = 1)`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check active providers: %w", err)
+	}
+	return exists, nil
 }
 
 // DeleteProvider deactivates a provider by ID. The active-provider count check and

@@ -7,16 +7,23 @@
   import FormField from "../../components/ui/FormField.svelte";
   import Input from "../../components/ui/Input.svelte";
   import EmptyState from "../../components/ui/EmptyState.svelte";
+  import ConfirmModal from "../../components/ui/ConfirmModal.svelte";
   import * as m from "../../paraglide/messages.js";
   import { handleError } from "../../lib/error.js";
 
-  let { openUploadModal = $bindable() } = $props<{
+  // With a patientId this lists and uploads that patient's documents; without one it manages
+  // clinic-wide documents.
+  let { openUploadModal = $bindable(), patientId = "" } = $props<{
     openUploadModal?: () => void;
+    patientId?: string;
   }>();
 
   let documents = $state<Document[]>([]);
   let isLoading = $state(true);
   let exportSuccessMsg = $state("");
+  let actionError = $state("");
+  let showConfirmDelete = $state(false);
+  let docToDelete = $state("");
 
   // Modal State
   let showUploadModal = $state(false);
@@ -28,19 +35,24 @@
 
   async function loadDocuments() {
     const currentToken = auth.token;
+    const currentPatientId = patientId;
     if (!currentToken) {
       isLoading = false;
       return;
     }
     isLoading = true;
     try {
-      const result = await DocumentService.ListClinicDocuments(currentToken);
-      if (auth.token === currentToken) {
+      const result = currentPatientId
+        ? await DocumentService.ListPatientDocuments(currentToken, {
+            patient_id: currentPatientId,
+          })
+        : await DocumentService.ListClinicDocuments(currentToken);
+      if (auth.token === currentToken && patientId === currentPatientId) {
         documents = result || [];
       }
     } catch (err) {
       if (auth.token === currentToken) {
-        console.error("Failed to load clinic documents:", err);
+        console.error("Failed to load documents:", err);
       }
     } finally {
       if (auth.token === currentToken) {
@@ -50,6 +62,7 @@
   }
 
   $effect(() => {
+    void patientId;
     if (auth.token) {
       loadDocuments();
     } else {
@@ -79,6 +92,8 @@
   async function handleUpload(e: Event) {
     e.preventDefault();
     if (!selectedFile || !docName) return;
+    // Snapshot the owner so a patient switch while the file is read cannot reassign it.
+    const targetPatientId = patientId;
 
     isUploading = true;
     uploadError = "";
@@ -96,9 +111,16 @@
         }
 
         try {
-          const mime = selectedFile?.type || "";
+          const lowerName = selectedFile?.name.toLowerCase() || "";
+          const isDicom =
+            lowerName.endsWith(".dcm") ||
+            lowerName.endsWith(".dicom") ||
+            !!selectedFile?.type.toLowerCase().includes("dicom");
+          const mime = isDicom ? "application/dicom" : selectedFile?.type || "";
           let docType = DocumentType.DocumentTypeOther;
-          if (mime.includes("pdf")) {
+          if (isDicom) {
+            docType = DocumentType.DocumentTypeXRay;
+          } else if (mime.includes("pdf")) {
             docType = DocumentType.DocumentTypePDF;
           } else if (mime.startsWith("image/")) {
             docType = DocumentType.DocumentTypeImage;
@@ -106,7 +128,7 @@
 
           await DocumentService.SaveDocumentBase64(
             auth.token,
-            "", // empty for clinic document
+            targetPatientId, // empty for clinic document
             docName,
             docDesc,
             docType,
@@ -132,14 +154,22 @@
     }
   }
 
-  async function handleDelete(id: string) {
-    if (confirm(m.doc_confirm_delete())) {
-      try {
-        await DocumentService.DeleteDocument(auth.token, id);
-        loadDocuments();
-      } catch (err) {
-        console.error("Failed to delete document:", err);
-      }
+  function handleDelete(id: string) {
+    actionError = "";
+    docToDelete = id;
+    showConfirmDelete = true;
+  }
+
+  async function executeDelete() {
+    if (!docToDelete) return;
+    try {
+      await DocumentService.DeleteDocument(auth.token, docToDelete);
+      loadDocuments();
+    } catch (err) {
+      console.error("Failed to delete document:", err);
+      actionError = handleError(err, m.doc_err_delete());
+    } finally {
+      docToDelete = "";
     }
   }
 
@@ -159,6 +189,7 @@
   }
 
   async function handleOpen(doc: Document) {
+    actionError = "";
     const win = window.open("", "_blank");
     try {
       const isDesktop = await SystemSettingsService.IsDesktopMode().catch(() => false);
@@ -188,11 +219,12 @@
         win.close();
       }
       console.error("Failed to open document:", err);
-      alert(m.doc_err_open());
+      actionError = handleError(err, m.doc_err_open());
     }
   }
 
   async function handleExport(doc: Document) {
+    actionError = "";
     try {
       const isDesktop = await SystemSettingsService.IsDesktopMode().catch(() => false);
       const suggestedName = doc.name || m.doc_default_export_name();
@@ -228,7 +260,7 @@
       }
     } catch (err) {
       console.error("Failed to export document:", err);
-      alert(m.doc_err_export());
+      actionError = handleError(err, m.doc_err_export());
     }
   }
 
@@ -242,6 +274,9 @@
 </script>
 
 <div class="space-y-6">
+  {#if actionError}
+    <p class="m-0 text-sm font-semibold text-rose-400" role="alert">{actionError}</p>
+  {/if}
   {#if isLoading}
     <div class="flex items-center justify-center py-12">
       <div
@@ -249,7 +284,10 @@
       ></div>
     </div>
   {:else if documents.length === 0}
-    <EmptyState title={m.doc_empty_title()} subtitle={m.doc_empty_subtitle()} />
+    <EmptyState
+      title={m.doc_empty_title()}
+      subtitle={patientId ? m.doc_patient_empty_subtitle() : m.doc_empty_subtitle()}
+    />
   {:else}
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {#each documents as doc}
@@ -312,7 +350,7 @@
 <Modal
   bind:showModal={showUploadModal}
   title={m.doc_btn_upload()}
-  subtitle={m.doc_modal_subtitle()}
+  subtitle={patientId ? m.doc_patient_modal_subtitle() : m.doc_modal_subtitle()}
   maxWidth="max-w-md"
 >
   <form onsubmit={handleUpload} class="space-y-4">
@@ -334,7 +372,7 @@
         type="text"
         bind:value={docName}
         required
-        placeholder={m.doc_placeholder_name()}
+        placeholder={patientId ? m.doc_patient_placeholder_name() : m.doc_placeholder_name()}
       />
     </FormField>
 
@@ -378,6 +416,12 @@
     </div>
   </form>
 </Modal>
+
+<ConfirmModal
+  bind:showModal={showConfirmDelete}
+  message={m.doc_confirm_delete()}
+  onConfirm={executeDelete}
+/>
 
 {#if exportSuccessMsg}
   <div
