@@ -263,55 +263,147 @@ html.light input[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(0.2);
 }
 
-/* Re-map the app's slate surfaces without changing its dark theme. */
-html.light [class*="bg-slate-950"] {
-  background-color: #f8fafc !important;
+/* Light-theme slate surface colors and opacity levels. */
+html.light :is([class~="bg-slate-950"], [class~="bg-slate-950/90"], [class~="bg-slate-950/80"], [class~="bg-slate-950/60"], [class~="bg-slate-950/45"], [class~="bg-slate-950/40"]) {
+  --light-surface-rgb: 248 250 252;
+  --light-surface-alpha: 1;
 }
 
-html.light [class*="bg-slate-900"] {
-  background-color: #ffffff !important;
+html.light :is([class~="bg-slate-900"], [class~="bg-slate-900/90"], [class~="bg-slate-900/80"], [class~="bg-slate-900/70"], [class~="bg-slate-900/60"], [class~="bg-slate-900/50"], [class~="bg-slate-900/40"]) {
+  --light-surface-rgb: 255 255 255;
+  --light-surface-alpha: 1;
 }
 
-html.light [class*="bg-slate-800"] {
-  background-color: #f1f5f9 !important;
+html.light :is([class~="bg-slate-800"], [class~="bg-slate-800/90"], [class~="bg-slate-800/80"], [class~="bg-slate-800/50"], [class~="bg-slate-800/40"], [class~="bg-slate-800/30"]) {
+  --light-surface-rgb: 241 245 249;
+  --light-surface-alpha: 1;
 }
 
-html.light [class*="bg-slate-700"] {
-  background-color: #e2e8f0 !important;
+html.light :is([class~="bg-slate-700"], [class~="bg-slate-700/80"], [class~="bg-slate-700/40"]) {
+  --light-surface-rgb: 226 232 240;
+  --light-surface-alpha: 1;
 }
 
-html.light [class*="bg-slate-600"] {
-  background-color: #cbd5e1 !important;
+html.light [class~="bg-slate-600"] {
+  --light-surface-rgb: 203 213 225;
+  --light-surface-alpha: 1;
 }
 
-html.light [class*="text-slate-50"],
-html.light [class*="text-slate-100"],
-html.light [class*="text-slate-200"],
-html.light [class*="text-slate-300"] {
+html.light :is([class~="bg-slate-950/90"], [class~="bg-slate-900/90"], [class~="bg-slate-800/90"]) {
+  --light-surface-alpha: 0.9;
+}
+
+html.light :is([class~="bg-slate-950/80"], [class~="bg-slate-900/80"], [class~="bg-slate-800/80"], [class~="bg-slate-700/80"]) {
+  --light-surface-alpha: 0.8;
+}
+
+html.light [class~="bg-slate-900/70"] {
+  --light-surface-alpha: 0.7;
+}
+
+html.light :is([class~="bg-slate-950/60"], [class~="bg-slate-900/60"]) {
+  --light-surface-alpha: 0.6;
+}
+
+html.light :is([class~="bg-slate-900/50"], [class~="bg-slate-800/50"]) {
+  --light-surface-alpha: 0.5;
+}
+
+html.light [class~="bg-slate-950/45"] {
+  --light-surface-alpha: 0.45;
+}
+
+html.light :is([class~="bg-slate-950/40"], [class~="bg-slate-900/40"], [class~="bg-slate-800/40"], [class~="bg-slate-700/40"]) {
+  --light-surface-alpha: 0.4;
+}
+
+html.light [class~="bg-slate-800/30"] {
+  --light-surface-alpha: 0.3;
+}
+
+html.light :is([class~="bg-slate-950"], [class~="bg-slate-950/90"], [class~="bg-slate-950/80"], [class~="bg-slate-950/60"], [class~="bg-slate-950/45"], [class~="bg-slate-950/40"], [class~="bg-slate-900"], [class~="bg-slate-900/90"], [class~="bg-slate-900/80"], [class~="bg-slate-900/70"], [class~="bg-slate-900/60"], [class~="bg-slate-900/50"], [class~="bg-slate-900/40"], [class~="bg-slate-800"], [class~="bg-slate-800/90"], [class~="bg-slate-800/80"], [class~="bg-slate-800/50"], [class~="bg-slate-800/40"], [class~="bg-slate-800/30"], [class~="bg-slate-700"], [class~="bg-slate-700/80"], [class~="bg-slate-700/40"], [class~="bg-slate-600"]) {
+  background-color: rgb(var(--light-surface-rgb) / var(--light-surface-alpha, 1)) !important;
+}
+
+html.light :is([class~="text-slate-50"], [class~="text-slate-100"], [class~="text-slate-200"], [class~="text-slate-300"]) {
   color: #0f172a !important;
 }
 
-html.light [class*="text-slate-400"],
-html.light [class*="text-slate-500"] {
+html.light :is([class~="text-slate-400"], [class~="text-slate-500"]) {
   color: #64748b !important;
 }
 
-html.light [class*="text-slate-600"],
-html.light [class*="text-slate-700"],
-html.light [class*="text-slate-800"],
-html.light [class*="text-slate-900"] {
+html.light :is([class~="text-slate-600"], [class~="text-slate-700"], [class~="text-slate-800"], [class~="text-slate-900"]) {
   color: #334155 !important;
 }
 
-html.light [class*="bg-slate-"][class*="text-white"],
-html.light [class*="bg-slate-"] [class*="text-white"] {
-  color: #0f172a !important;
-}
-
-html.light [class*="border-slate-"] {
+html.light :is([class~="border-slate-500"], [class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) {
   border-color: #cbd5e1 !important;
 }
 
-html.light .fixed.inset-0[class*="bg-slate-950"] {
+/* Light-theme hover colors for slate controls. */
+html.light [class~="hover:bg-slate-800"]:hover {
+  background-color: #e2e8f0 !important;
+}
+
+html.light [class~="hover:bg-slate-700"]:hover {
+  background-color: #cbd5e1 !important;
+}
+
+html.light [class~="hover:bg-slate-800/80"]:hover {
+  background-color: rgb(226 232 240 / 0.8) !important;
+}
+
+html.light [class~="hover:bg-slate-700/80"]:hover {
+  background-color: rgb(203 213 225 / 0.8) !important;
+}
+
+html.light [class~="hover:bg-slate-700/40"]:hover {
+  background-color: rgb(203 213 225 / 0.4) !important;
+}
+
+html.light [class~="hover:bg-slate-800/50"]:hover {
+  background-color: rgb(226 232 240 / 0.5) !important;
+}
+
+html.light [class~="hover:bg-slate-800/40"]:hover {
+  background-color: rgb(226 232 240 / 0.4) !important;
+}
+
+html.light [class~="hover:bg-slate-800/30"]:hover {
+  background-color: rgb(226 232 240 / 0.3) !important;
+}
+
+html.light [class~="hover:bg-slate-900/50"]:hover {
+  background-color: rgb(241 245 249 / 0.5) !important;
+}
+
+html.light [class~="hover:bg-slate-900"]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+html.light [class~="hover:text-slate-200"]:hover {
+  color: #0f172a !important;
+}
+
+html.light .group:hover [class~="group-hover:text-slate-400"] {
+  color: #64748b !important;
+}
+
+html.light :is([class~="hover:border-slate-700"], [class~="hover:border-slate-600"], [class~="hover:border-slate-500"]):hover {
+  border-color: #94a3b8 !important;
+}
+
+/* Light-theme text color for white labels on slate surfaces. */
+html.light [class~="text-white"]:is([class~="bg-slate-950"], [class~="bg-slate-950/90"], [class~="bg-slate-950/80"], [class~="bg-slate-950/60"], [class~="bg-slate-950/45"], [class~="bg-slate-950/40"], [class~="bg-slate-900"], [class~="bg-slate-900/90"], [class~="bg-slate-900/80"], [class~="bg-slate-900/70"], [class~="bg-slate-900/60"], [class~="bg-slate-900/50"], [class~="bg-slate-900/40"], [class~="bg-slate-800"], [class~="bg-slate-800/90"], [class~="bg-slate-800/80"], [class~="bg-slate-800/50"], [class~="bg-slate-800/40"], [class~="bg-slate-800/30"], [class~="bg-slate-700"], [class~="bg-slate-700/80"], [class~="bg-slate-700/40"], [class~="bg-slate-600"]) {
+  color: #0f172a !important;
+}
+
+html.light [class~="hover:text-white"]:is([class~="bg-slate-950"], [class~="bg-slate-950/90"], [class~="bg-slate-950/80"], [class~="bg-slate-950/60"], [class~="bg-slate-950/45"], [class~="bg-slate-950/40"], [class~="bg-slate-900"], [class~="bg-slate-900/90"], [class~="bg-slate-900/80"], [class~="bg-slate-900/70"], [class~="bg-slate-900/60"], [class~="bg-slate-900/50"], [class~="bg-slate-900/40"], [class~="bg-slate-800"], [class~="bg-slate-800/90"], [class~="bg-slate-800/80"], [class~="bg-slate-800/50"], [class~="bg-slate-800/40"], [class~="bg-slate-800/30"], [class~="bg-slate-700"], [class~="bg-slate-700/80"], [class~="bg-slate-700/40"], [class~="bg-slate-600"]):hover {
+  color: #0f172a !important;
+}
+
+/* Light-theme modal backdrop color. */
+html.light .fixed.inset-0:is([class~="bg-slate-950/80"], [class~="bg-slate-950/90"]) {
   background-color: rgb(15 23 42 / 0.45) !important;
 }
