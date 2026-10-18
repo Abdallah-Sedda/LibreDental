@@ -101,20 +101,20 @@ func main() {
 			Port: serverCfg.Port,
 		},
 		Services: []application.Service{
-			application.NewService(patientService),
-			application.NewService(appointmentService),
-			application.NewService(practiceConfigService),
-			application.NewService(systemSettingsService),
-			application.NewService(chartService),
-			application.NewService(billingService),
-			application.NewService(documentService),
-			application.NewService(notificationService),
-			application.NewService(bridgeService),
-			application.NewService(timecardService),
-			application.NewService(auditService),
-			application.NewService(reminderService),
+			newService(patientService),
+			newService(appointmentService),
+			newService(practiceConfigService),
+			newService(systemSettingsService),
+			newService(chartService),
+			newService(billingService),
+			newService(documentService),
+			newService(notificationService),
+			newService(bridgeService),
+			newService(timecardService),
+			newService(auditService),
+			newService(reminderService),
 			// Last, so the reminder job starts after every other service and stops first.
-			application.NewService(newReminderJobLifecycle(reminderService)),
+			newService(newReminderJobLifecycle(reminderService)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -147,4 +147,13 @@ func main() {
 	if err := wailsApp.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// newService binds a service with LibreDental's error marshaler, which attaches error codes the
+// frontend translates. Wails uses each service's own marshaler for bound calls and ignores the
+// application-level one, so it has to be set per service.
+func newService[T any](instance *T) application.Service {
+	return application.NewServiceWithOptions(instance, application.ServiceOptions{
+		MarshalError: services.MarshalError,
+	})
 }
