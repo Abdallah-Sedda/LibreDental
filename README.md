@@ -41,7 +41,7 @@ LibreDental addresses the growing need for modern, open-source dental practice m
 
 ## Getting Started & Contributing
 
-LibreDental™ is built as a **[Wails v3](https://v3.wails.io)** application combining a Go backend with a modern Svelte 5 / Vite frontend. We welcome contributions from developers, dental professionals, UI/UX designers, and open-source advocates!
+LibreDental is built as a **[Wails v3](https://v3.wails.io)** application combining a Go backend with a modern Svelte 5 / Vite frontend. We welcome contributions from developers, dental professionals, UI/UX designers, and open-source advocates!
 
 ### Prerequisites
 
@@ -105,6 +105,8 @@ All project build, development, and formatting tasks are managed through [Task](
 | `task artifact` | Builds all local artifacts (desktop binary, server binary, and demo data). |
 | `task demo` | Generates a standalone pre-populated save archive (`libredental-demo-data.zip`) for testing. |
 | `task format` | Formats Go backend files with `gofmt -w -s` and frontend code with Prettier. **Must be run before creating PRs.** |
+| `task test` | Runs the Go tests and the frontend type/Svelte check. |
+| `task check` | Runs the same quality checks as CI (`gofmt -l`, `go vet`, Go tests, Prettier `format:check`, and `svelte-check`). Run it before opening a PR to catch CI failures locally. |
 | `task deps:update` | Safely updates Go modules and frontend npm packages together, keeping the `wails3` CLI and `@wailsio/runtime` pinned to the same Wails version, then regenerates bindings and verifies the repo still builds and tests pass. |
 | `task deps:sync-wails` | Aligns the installed `wails3` CLI and `@wailsio/runtime` to whatever Wails version `go.mod` already pins, without upgrading any dependencies. Useful right after cloning. |
 
