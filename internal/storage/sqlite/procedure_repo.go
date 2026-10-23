@@ -13,10 +13,10 @@ import (
 
 // ProcedureRepository implements storage.ProcedureCodeRepository and storage.FeeScheduleRepository.
 type ProcedureRepository struct {
-	db *DB
+	db queryExecutor
 }
 
-func NewProcedureRepository(db *DB) *ProcedureRepository {
+func NewProcedureRepository(db queryExecutor) *ProcedureRepository {
 	return &ProcedureRepository{db: db}
 }
 
@@ -76,7 +76,7 @@ func (r *ProcedureRepository) GetByCode(ctx context.Context, countryCode domain.
 // ── FeeScheduleRepository Implementation ────────────────────────────────────
 
 func (r *ProcedureRepository) Save(ctx context.Context, schedule *domain.FeeSchedule) error {
-	if schedule == nil || schedule.CountryCode == "" || schedule.Code == "" {
+	if schedule == nil || schedule.CountryCode == "" || schedule.Code == "" || !validFee(schedule.CustomFee) {
 		return fmt.Errorf("%w: country_code and code are required", storage.ErrInvalidInput)
 	}
 	if schedule.ID == "" {
@@ -158,6 +158,9 @@ func (r *ProcedureRepository) GetEffectiveFee(ctx context.Context, countryCode d
 		if err == nil {
 			return fee, nil
 		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
 	}
 
 	// 2. Check practice-wide custom fee override (provider_id IS NULL)
@@ -169,6 +172,9 @@ func (r *ProcedureRepository) GetEffectiveFee(ctx context.Context, countryCode d
 	).Scan(&practiceFee)
 	if err == nil {
 		return practiceFee, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
 	}
 
 	// 3. Fallback to procedure_codes catalog default fee
@@ -182,5 +188,5 @@ func (r *ProcedureRepository) GetEffectiveFee(ctx context.Context, countryCode d
 		return defaultFee, nil
 	}
 
-	return 0, nil
+	return 0, err
 }

@@ -26,6 +26,13 @@
     countryMeta?: CountryConfig | null;
   }>();
 
+  import PricingPicker from "../components/PricingPicker.svelte";
+  import type { PricingSource } from "@bindings/domain/models.js";
+  let showPricing = $state(false);
+  let pendingConditionId = $state("");
+  let savingCondition = $state(false);
+  let conditionError = $state("");
+
   // Patient selection state
   let selectedPatientId = $state<string>("");
   let selectedPatient = $derived(patients.find((p: Patient) => p.id === selectedPatientId) || null);
@@ -162,7 +169,7 @@
       presets.push({
         code: item.code,
         desc: item.description,
-        fee: (item.effective_fee || item.default_fee) / 100,
+        fee: (item.effective_fee ?? item.default_fee) / 100,
         status: def.status,
       });
     }
@@ -306,6 +313,7 @@
     formDescription = "";
     formStatus = ToothStatus.ToothStatusTreatmentPlanned;
     formFee = 0;
+    pendingConditionId = crypto.randomUUID();
     showConditionModal = true;
   }
 
@@ -338,17 +346,53 @@
 
   async function handleSaveCondition(e: Event) {
     e.preventDefault();
+    if (savingCondition) return;
+    conditionError = "";
+    const old = currentChart?.conditions?.find((c) => c.id === editingConditionId);
+    const billable =
+      formStatus === ToothStatus.ToothStatusTreatmentPlanned ||
+      formStatus === ToothStatus.ToothStatusCompleted;
+    const wasBillable =
+      old?.status === ToothStatus.ToothStatusTreatmentPlanned ||
+      old?.status === ToothStatus.ToothStatusCompleted;
+    if (
+      !billable ||
+      (isEditingCondition &&
+        old &&
+        wasBillable &&
+        (old.ada_code || "") === formADACode &&
+        old.fee === Math.round(Number(formFee) * 100))
+    ) {
+      try {
+        await saveConfirmedCondition(old?.pricing, true);
+      } catch (e) {
+        conditionError = handleError(e, m.insurance_error());
+      }
+      return;
+    }
+    showPricing = true;
+  }
+
+  async function saveConfirmedCondition(pricing?: PricingSource | null, preserveAmount = false) {
+    if (savingCondition) return;
     if (!selectedPatientId || !selectedToothNumber) return;
+    savingCondition = true;
 
     const conditionData: Omit<ToothCondition, "created_at" | "updated_at"> = {
-      id: isEditingCondition ? editingConditionId : `cond_${Date.now()}`,
+      id: isEditingCondition ? editingConditionId : pendingConditionId,
+      pricing,
+      expected_updated_at: isEditingCondition
+        ? currentChart?.conditions?.find((c) => c.id === editingConditionId)?.updated_at
+        : undefined,
       patient_id: selectedPatientId,
       tooth_number: selectedToothNumber,
       surfaces: formSurfaces,
-      ada_code: formADACode,
+      ada_code: preserveAmount ? formADACode : pricing?.code || formADACode,
       description: formDescription.trim() || m.charting_default_finding(),
       status: formStatus,
-      fee: Math.round(Number(formFee) * 100) || 0,
+      fee: preserveAmount
+        ? Math.round(Number(formFee) * 100)
+        : (pricing?.amount ?? Math.round(Number(formFee) * 100)),
     };
 
     try {
@@ -357,6 +401,9 @@
       await loadChart(selectedPatientId);
     } catch (err) {
       console.error("Failed to save tooth condition:", err);
+      throw err;
+    } finally {
+      savingCondition = false;
     }
   }
 
@@ -528,6 +575,7 @@
 
 <ToothConditionModal
   bind:showConditionModal
+  errorMsg={conditionError}
   {selectedToothNumber}
   {currentToothSystem}
   {countryMeta}
@@ -555,4 +603,15 @@
   title={m.common_confirm()}
   message={m.confirm_delete_condition()}
   onConfirm={executeDeleteCondition}
+/>
+
+<PricingPicker
+  bind:showModal={showPricing}
+  patientID={selectedPatientId}
+  patientName={selectedPatient ? getPatientLabel(selectedPatient) : ""}
+  code={formADACode || "PROC"}
+  description={formDescription}
+  {countryMeta}
+  manualFee={Math.round(Number(formFee) * 100)}
+  onconfirm={saveConfirmedCondition}
 />
