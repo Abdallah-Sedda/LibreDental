@@ -410,6 +410,26 @@ const launchOptions = { headless: !headed, slowMo: headed ? 250 : 0 };
     await p.getByRole("heading", { name: "Edit Claim", exact: true }).waitFor({ state: "hidden" });
     assert.equal(JSON.parse(savedClaim("legacy-manual-claim").line_items)[0].fee, 22200);
     pass("Deliberate manual repricing changes the saved amount only after confirmation");
+    await p.getByRole("button", { name: "New Claim", exact: true }).click();
+    await p.getByRole("button", { name: "+ Add Row", exact: true }).click();
+    await p
+      .getByRole("textbox", { name: "Description", exact: true })
+      .fill("Synthetic zero manual charge");
+    await p.getByRole("dialog").getByRole("button", { name: "New Claim", exact: true }).click();
+    await p.getByText("Final amount to save: $0.00", { exact: true }).waitFor();
+    await p.getByRole("button", { name: "Confirm", exact: true }).click();
+    await p.getByRole("heading", { name: "New Claim", exact: true }).waitFor({ state: "hidden" });
+    const zeroDB = new DatabaseSync(databasePath, { readOnly: true });
+    const zeroClaim = zeroDB
+      .prepare(
+        "SELECT line_items FROM claims WHERE line_items LIKE '%Synthetic zero manual charge%'"
+      )
+      .get();
+    zeroDB.close();
+    assert.equal(JSON.parse(zeroClaim.line_items)[0].fee, 0);
+    assert.equal(JSON.parse(zeroClaim.line_items)[0].pricing.kind, "manual");
+    pass("Uncatalogued zero-dollar manual charge requires confirmation and saves zero");
+
     await p.getByRole("button", { name: "Bundles", exact: true }).click();
     await p.getByRole("button", { name: "Create Bundle", exact: true }).click();
     await p.locator("#b-shortname").fill("synthetic-bundle");

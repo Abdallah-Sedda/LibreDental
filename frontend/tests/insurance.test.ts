@@ -583,3 +583,123 @@ it("removes a reviewed price and confirmation controls immediately on logout", a
   expect(screen.queryByText("Patient A")).toBeNull();
   expect(confirm).not.toHaveBeenCalled();
 });
+it("rejects fractional cents rather than silently rounding an insurance fee", async () => {
+  render(InsuranceSection, { countryMeta: meta });
+  await fireEvent.click(await screen.findByRole("button", { name: "Example Insurance" }));
+  await fireEvent.input(screen.getByRole("spinbutton", { name: "Fee for D2391" }), {
+    target: { value: "1.005" },
+  });
+  expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(api.saveFee).not.toHaveBeenCalled();
+});
+it("keeps a zero-dollar uncatalogued procedure on manual pricing", async () => {
+  api.preview.mockImplementation(async (_token, p) => {
+    if (p.kind !== "manual") throw new Error("No base procedure");
+    return {
+      ...p,
+      has_base: false,
+      base_fee: 0,
+      standard_fee: 0,
+      amount: 0,
+      version: "manual-zero",
+    };
+  });
+  const confirm = vi.fn();
+  render(PricingPicker, {
+    showModal: true,
+    patientID: patient.id,
+    patientName: "Alice Example",
+    code: "PROC",
+    description: "Manual procedure",
+    manualFee: 0,
+    countryMeta: meta,
+    onconfirm: confirm,
+  });
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(
+      false
+    )
+  );
+  await fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ kind: "manual", amount: 0 }));
+});
+it("makes chart-linked procedure codes and fees read-only", async () => {
+  api.claims = [
+    {
+      id: "linked",
+      patient_id: patient.id,
+      provider_id: "",
+      date_of_service: "2026-01-01",
+      status: "draft",
+      line_items: [
+        {
+          id: "line",
+          tooth_condition_id: "condition",
+          ada_code: "D2391",
+          description: "Linked filling",
+          fee: 12345,
+        },
+      ],
+    },
+  ];
+  render(ClaimsSection, { patients: [patient], providers: [], countryMeta: meta });
+  await fireEvent.click(await screen.findByRole("button", { name: "Edit", exact: true }));
+  expect(
+    (screen.getByRole("textbox", { name: "Procedure Code" }) as HTMLInputElement).disabled
+  ).toBe(true);
+  expect((screen.getByRole("spinbutton", { name: "Fee" }) as HTMLInputElement).disabled).toBe(true);
+});
+it("shows failed notes-only saves inside the claim modal without an unhandled rejection", async () => {
+  await editExistingClaim();
+  api.updateClaim.mockRejectedValueOnce({});
+  await fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+  await within(screen.getByRole("dialog")).findByText(
+    "Unable to complete the request. Review the details and try again."
+  );
+});
+it("rejects an empty chart fee and clears its error when reopening the form", async () => {
+  const view = render(ChartingView, { patients: [patient], countryMeta: meta });
+  await fireEvent.change(screen.getByLabelText("Patient:"), { target: { value: patient.id } });
+  await fireEvent.click(await screen.findByRole("button", { name: /^3(?:\s|$)/ }));
+  await fireEvent.input(view.container.querySelector("#condition-description")!, {
+    target: { value: "Synthetic validation finding" },
+  });
+  await fireEvent.input(view.container.querySelector("#condition-fee")!, { target: { value: "" } });
+  await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+  await screen.findByText("Enter a valid nonnegative fee with no more than two decimal places.");
+  expect(api.saveTreatment).not.toHaveBeenCalled();
+  expect(api.preview).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+  await fireEvent.click(screen.getByRole("button", { name: /^3(?:\s|$)/ }));
+  expect(
+    screen.queryByText("Enter a valid nonnegative fee with no more than two decimal places.")
+  ).toBeNull();
+});
+it("accepts an intentionally entered zero chart fee after explicit confirmation", async () => {
+  const view = render(ChartingView, { patients: [patient], countryMeta: meta });
+  await fireEvent.change(screen.getByLabelText("Patient:"), { target: { value: patient.id } });
+  await fireEvent.click(await screen.findByRole("button", { name: /^3(?:\s|$)/ }));
+  await fireEvent.change(view.container.querySelector("#condition-catalog-code")!, {
+    target: { value: "D2391" },
+  });
+  await fireEvent.input(view.container.querySelector("#condition-fee")!, {
+    target: { value: "0" },
+  });
+  await fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(
+      false
+    )
+  );
+  expect(api.saveTreatment).not.toHaveBeenCalled();
+  await fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  await waitFor(() =>
+    expect(api.saveTreatment).toHaveBeenCalledWith(
+      "session",
+      expect.objectContaining({
+        fee: 0,
+        pricing: expect.objectContaining({ kind: "manual", amount: 0 }),
+      })
+    )
+  );
+});

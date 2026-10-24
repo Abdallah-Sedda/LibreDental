@@ -905,7 +905,7 @@
   "insurance_rename": "Rename",
   "insurance_restore": "Restore",
   "insurance_archive": "Archive",
-  "insurance_error": "Unable to save insurance pricing. Review the selection and try again.",
+  "insurance_error": "Unable to complete the request. Review the details and try again.",
   "insurance_unavailable": "This insurance provider is unavailable or archived. Choose another source.",
   "insurance_missing_fee": "No configured fee",
   "insurance_plan_fee": "Insurance fee",
@@ -920,5 +920,6 @@
   "insurance_empty_catalog": "No procedure codes available for {name}.",
   "insurance_no_base": "Procedure not in catalog; no original reference price is available.",
   "insurance_duplicate": "This name already exists. Select or restore the existing entry.",
-  "insurance_price_changed": "The price changed. Review the current amount and confirm again."
+  "insurance_price_changed": "The price changed. Review the current amount and confirm again.",
+  "insurance_invalid_fee": "Enter a valid nonnegative fee with no more than two decimal places."
 }

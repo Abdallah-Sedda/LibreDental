@@ -94,7 +94,7 @@ tasks:
       - cd frontend && {{.PACKAGE_MANAGER}} run format
 
   test:
-    desc: Runs go test and npm run check on the repo
+    desc: Runs Go tests, frontend type checks and frontend interaction tests
     cmds:
       - go test ./...
       - cd frontend && {{.PACKAGE_MANAGER}} run check

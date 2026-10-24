@@ -107,7 +107,10 @@
         return;
       if (!standard) throw new Error(m.insurance_error());
       reference = standard;
-      const k = preferManual || manualFee !== standard.standard_fee ? "manual" : "standard";
+      const k =
+        preferManual || !standard.has_base || manualFee !== standard.standard_fee
+          ? "manual"
+          : "standard";
       selectedProvider = "";
       showAll = true;
       await review(k, selectedProvider);

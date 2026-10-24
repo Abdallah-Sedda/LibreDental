@@ -228,7 +228,10 @@
                     aria-label={m.insurance_fee_for({ code: p.code })}
                     value={amounts[p.code] ?? ""}
                     disabled={loadingFees || busy}
-                    oninput={(e) => (amounts[p.code] = e.currentTarget.valueAsNumber)}
+                    oninput={(e) =>
+                      (amounts[p.code] = e.currentTarget.validity.valid
+                        ? e.currentTarget.valueAsNumber
+                        : NaN)}
                   />
                 </td><td class="p-2"
                   ><button

@@ -39,7 +39,7 @@ type ToothCondition struct {
 	Status            ToothStatus    `json:"status"`
 	Fee               int64          `json:"fee"`
 	Pricing           *PricingSource `json:"pricing,omitempty"`
-	ExpectedUpdatedAt time.Time      `json:"expected_updated_at,omitempty"`
+	ExpectedUpdatedAt time.Time      `json:"-"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 }

@@ -76,8 +76,11 @@ func (r *ProcedureRepository) GetByCode(ctx context.Context, countryCode domain.
 // ── FeeScheduleRepository Implementation ────────────────────────────────────
 
 func (r *ProcedureRepository) Save(ctx context.Context, schedule *domain.FeeSchedule) error {
-	if schedule == nil || schedule.CountryCode == "" || schedule.Code == "" || !validFee(schedule.CustomFee) {
+	if schedule == nil || schedule.CountryCode == "" || schedule.Code == "" {
 		return fmt.Errorf("%w: country_code and code are required", storage.ErrInvalidInput)
+	}
+	if !validFee(schedule.CustomFee) {
+		return fmt.Errorf("%w: custom_fee must be between 0 and 9007199254740991", storage.ErrInvalidInput)
 	}
 	if schedule.ID == "" {
 		schedule.ID = fmt.Sprintf("fee_%d", time.Now().UnixNano())

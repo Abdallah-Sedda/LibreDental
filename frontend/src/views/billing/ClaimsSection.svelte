@@ -73,7 +73,7 @@
         pricingLine = next;
         return false;
       }
-      await saveClaim(new Event("submit"));
+      await saveClaim(new Event("submit"), true);
     }
   }
   let claims = $state<Claim[]>([]);
@@ -287,7 +287,7 @@
     }
   }
 
-  async function saveClaim(e: Event) {
+  async function saveClaim(e: Event, propagateError = false) {
     e.preventDefault();
     if (!claimPatientId || !claimDateOfService || savingClaim) return;
     const missing = claimLineItems.findIndex(needsPricing);
@@ -345,7 +345,7 @@
         )
           li.pricing = undefined;
       }
-      throw e;
+      if (propagateError) throw e;
     } finally {
       savingClaim = false;
     }
@@ -644,7 +644,8 @@
   subtitle={m.billing_claim_modal_subtitle()}
   maxWidth="max-w-4xl"
 >
-  <form onsubmit={saveClaim} class="space-y-5">
+  <form onsubmit={(e) => saveClaim(e)} class="space-y-5">
+    {#if claimsError}<p role="alert" class="text-sm text-rose-400">{claimsError}</p>{/if}
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <FormField label={m.appt_label_patient()} forId="cl-patient" required>
         <select
@@ -799,6 +800,7 @@
               <div class="col-span-2">
                 <Input
                   bind:value={li.ada_code}
+                  disabled={!!li.tooth_condition_id}
                   aria-label={m.charting_th_code()}
                   placeholder={m.billing_claim_code_placeholder()}
                   class="font-mono text-xs py-1.5 px-2"
@@ -843,6 +845,7 @@
                 <Input
                   type="number"
                   bind:value={li.fee}
+                  disabled={!!li.tooth_condition_id}
                   aria-label={m.charting_th_fee()}
                   step="0.01"
                   min="0"

@@ -3,6 +3,7 @@
     Patient,
     DentalChart,
     ToothCondition,
+    SaveToothConditionPayload,
     CountryConfig,
     ProcedureCode,
   } from "@bindings/domain/models.js";
@@ -305,6 +306,7 @@
   }
 
   function openAddConditionForTooth(toothNum: number) {
+    conditionError = "";
     selectedToothNumber = toothNum;
     isEditingCondition = false;
     editingConditionId = "";
@@ -318,6 +320,7 @@
   }
 
   function openEditCondition(cond: ToothCondition) {
+    conditionError = "";
     selectedToothNumber = cond.tooth_number;
     isEditingCondition = true;
     editingConditionId = cond.id;
@@ -348,6 +351,10 @@
     e.preventDefault();
     if (savingCondition) return;
     conditionError = "";
+    if (formFee == null || !Number.isFinite(formFee) || formFee < 0) {
+      conditionError = m.insurance_invalid_fee();
+      return;
+    }
     const old = currentChart?.conditions?.find((c) => c.id === editingConditionId);
     const billable =
       formStatus === ToothStatus.ToothStatusTreatmentPlanned ||
@@ -378,7 +385,7 @@
     if (!selectedPatientId || !selectedToothNumber) return;
     savingCondition = true;
 
-    const conditionData: Omit<ToothCondition, "created_at" | "updated_at"> = {
+    const conditionData: SaveToothConditionPayload = {
       id: isEditingCondition ? editingConditionId : pendingConditionId,
       pricing,
       expected_updated_at: isEditingCondition

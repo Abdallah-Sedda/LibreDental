@@ -71,8 +71,9 @@ func TestInsuranceStaleConfirmationAndAtomicity(t *testing.T) {
 		t.Fatal("partial charge saved", err)
 	}
 	review = f.preview(t, "patient-a", "D2391", "insurance")
-	review.PatientID = "patient-b"
-	if _, err := f.repo.ConfirmCondition(ctx, treatment("wrong-patient", review)); err == nil {
+	wrong := treatment("wrong-patient", review)
+	wrong.PatientID = "patient-b"
+	if _, err := f.repo.ConfirmCondition(ctx, wrong); err == nil {
 		t.Fatal("patient identity mismatch accepted")
 	}
 	f.fee(t, "D2391", 0)
@@ -316,5 +317,74 @@ func TestInsuranceSnapshotsAndRestart(t *testing.T) {
 	}
 	if old.LineItems[0].Fee != 10000 {
 		t.Fatal("historical claim repriced")
+	}
+}
+
+func TestInsuranceClaimChangesCannotBypassConfirmation(t *testing.T) {
+	for _, insured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("insured=%t", insured), func(t *testing.T) {
+			f := setupInsurance(t)
+			ctx := context.Background()
+			f.fee(t, "D2391", 100)
+			claim := &domain.Claim{ID: "correction", PatientID: "patient-a", DateOfService: "2026-10-23", LineItems: []domain.ClaimLineItem{{ID: "line", ADACode: "D2391", Fee: 100}}}
+			if insured {
+				claim.LineItems[0].Pricing = f.preview(t, "patient-a", "D2391", "insurance")
+				if err := f.repo.ConfirmClaim(ctx, claim, false); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := NewClaimRepository(f.db).Create(ctx, claim); err != nil {
+				t.Fatal(err)
+			}
+			for _, codeChanged := range []bool{false, true} {
+				changed, err := NewClaimRepository(f.db).GetByID(ctx, claim.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				changed.LineItems[0].Pricing = nil
+				if codeChanged {
+					changed.LineItems[0].ADACode = "D0120"
+				} else {
+					changed.LineItems[0].Fee = 200
+				}
+				if err := f.repo.ConfirmClaim(ctx, changed, true); !errors.Is(err, storage.ErrInvalidInput) {
+					t.Fatal("unconfirmed correction accepted", err)
+				}
+				saved, err := NewClaimRepository(f.db).GetByID(ctx, claim.ID)
+				if err != nil || saved.LineItems[0].Fee != 100 || saved.LineItems[0].ADACode != "D2391" {
+					t.Fatal("failed correction changed stored claim", saved, err)
+				}
+			}
+			claim.Notes = "Notes only"
+			claim.LineItems[0].Pricing = nil
+			if err := f.repo.ConfirmClaim(ctx, claim, true); err != nil {
+				t.Fatal("unchanged line requires confirmation", err)
+			}
+			if insured && claim.LineItems[0].Pricing == nil {
+				t.Fatal("unchanged source lost")
+			}
+			manual, err := f.repo.Preview(ctx, &domain.PricingSource{Kind: "manual", PatientID: "patient-a", CountryCode: domain.CountryUS, Code: "D2391", Amount: 200})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim.LineItems[0].Fee = 200
+			claim.LineItems[0].Pricing = manual
+			if err := f.repo.ConfirmClaim(ctx, claim, true); err != nil {
+				t.Fatal("confirmed correction rejected", err)
+			}
+		})
+	}
+}
+
+func TestInsuranceConditionResponseOmitsRequestToken(t *testing.T) {
+	b, err := json.Marshal(&domain.ToothCondition{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(b, &response); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := response["expected_updated_at"]; ok {
+		t.Fatal("request-only token leaked into response")
 	}
 }

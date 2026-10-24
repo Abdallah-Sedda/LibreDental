@@ -12,7 +12,8 @@
     "check": "npm run build:i18n && svelte-check --tsconfig ./tsconfig.json --tsgo",
     "format:check": "prettier --check . ../.github",
     "format": "prettier --write . ../.github",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts",
+    "pretest": "task --dir .. common:generate:bindings && npm run build:i18n"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -37,6 +38,6 @@
     "tslib": "^2.6.2",
     "typescript": "^6.0.3",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vitest": "^4.1.12"
   }
 }

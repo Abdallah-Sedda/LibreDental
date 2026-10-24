@@ -72,19 +72,23 @@ func TestMigrations_UpgradePreservesPatientData(t *testing.T) {
 		t.Errorf("patient data changed in upgrade: %s / %s / %s", name, carrier, policy)
 	}
 	assertLinkedRowsIntact(t, db.DB, "upgrade")
-	for query, want := range map[string]int64{
-		`SELECT default_fee FROM procedure_codes WHERE country_code='US' AND code='D2391'`: 14000,
-		`SELECT custom_fee FROM fee_schedules WHERE id='practice-fee'`:                     10000,
-		`SELECT custom_fee FROM fee_schedules WHERE id='clinician-fee'`:                    12000,
-		`SELECT json_extract(line_items,'$[0].fee') FROM claims WHERE id='claim_1'`:        12345,
-		`SELECT fee FROM dental_conditions WHERE id='cond_1'`:                              4567,
-		`SELECT amount FROM payments WHERE id='legacy-payment'`:                            2222,
-	} {
-		var got int64
-		if err := db.QueryRow(query).Scan(&got); err != nil || got != want {
-			t.Errorf("upgrade changed money: %s: got %d, want %d (%v)", query, got, want, err)
+	assertMoney := func() {
+		for query, want := range map[string]int64{
+			`SELECT default_fee FROM procedure_codes WHERE country_code='US' AND code='D2391'`: 14000,
+			`SELECT custom_fee FROM fee_schedules WHERE id='practice-fee'`:                     10000,
+			`SELECT custom_fee FROM fee_schedules WHERE id='clinician-fee'`:                    12000,
+			`SELECT json_extract(line_items,'$[0].fee') FROM claims WHERE id='claim_1'`:        12345,
+			`SELECT fee FROM dental_conditions WHERE id='cond_1'`:                              4567,
+			`SELECT amount FROM payments WHERE id='legacy-payment'`:                            2222,
+		} {
+			var got int64
+			if err := db.QueryRow(query).Scan(&got); err != nil || got != want {
+				t.Errorf("upgrade changed money: %s: got %d, want %d (%v)", query, got, want, err)
+			}
 		}
+
 	}
+	assertMoney()
 
 	// The reminder migration adds columns to tables that already hold rows: existing
 	// notifications have no reminder key, and the practice has no timezone until one is set.
@@ -122,6 +126,7 @@ func TestMigrations_UpgradePreservesPatientData(t *testing.T) {
 		t.Errorf("notification lost across rollback: %q (err %v)", status, err)
 	}
 	assertLinkedRowsIntact(t, db.DB, "rollback and re-apply")
+	assertMoney()
 }
 
 // assertLinkedRowsIntact checks the claim and chart rows referencing pat_1 survived and that no

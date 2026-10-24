@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/LibreDental/libredental/internal/domain"
 	"github.com/LibreDental/libredental/internal/storage"
@@ -48,7 +49,7 @@ func (s *InsuranceService) SaveProvider(token string, p *domain.InsuranceProvide
 		action = domain.AuditActionCreate
 	}
 	if err := s.repo.SaveProvider(context.Background(), p); err != nil {
-		return nil, err
+		return nil, errors.Join(err, s.audit.LogAction(token, action, "insurance_provider", "Insurance provider change failed: "+err.Error()))
 	}
 	if err := s.audit.LogAction(token, action, "insurance_provider", "Saved insurance provider: "+insuranceDetails(p)); err != nil {
 		return nil, err
@@ -66,7 +67,7 @@ func (s *InsuranceService) SaveFee(token string, f *domain.InsuranceFee) error {
 		return err
 	}
 	if err := s.repo.SaveFee(context.Background(), f); err != nil {
-		return err
+		return errors.Join(err, s.audit.LogAction(token, domain.AuditActionUpdate, "insurance_fee", "Insurance fee change failed: "+err.Error()))
 	}
 	return s.audit.LogAction(token, domain.AuditActionUpdate, "insurance_fee", "Saved plan procedure fee: "+insuranceDetails(f))
 }
@@ -78,7 +79,7 @@ func (s *InsuranceService) DeleteFee(token, plan, cc, code string) error {
 		return err
 	}
 	if err := s.repo.DeleteFee(context.Background(), plan, domain.CountryCode(cc), code); err != nil {
-		return err
+		return errors.Join(err, s.audit.LogAction(token, domain.AuditActionDelete, "insurance_fee", "Insurance fee removal failed: "+err.Error()))
 	}
 	return s.audit.LogAction(token, domain.AuditActionDelete, "insurance_fee", "Removed plan procedure fee: "+plan+" / "+cc+" / "+code)
 }

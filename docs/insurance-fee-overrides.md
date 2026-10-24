@@ -5,7 +5,7 @@ replacement procedure fees. Names are normalized for duplicate detection. Provid
 be searched, renamed, archived and restored. Archived names remain reserved.
 
 Each provider has one fee per country/procedure. Fees are entered as monetary amounts and stored in integer cents;
-an explicitly saved zero is valid, while an empty value means no configured override.
+an explicitly saved zero is valid. Use Remove override to clear a configured fee.
 The original procedure catalog and its reference price remain unchanged.
 
 New billable treatments and direct claim lines use a shared pricing review. Staff can
@@ -19,7 +19,7 @@ Provider fees are stored in `insurance_fee_overrides`, referencing `insurance_pr
 and the existing country/procedure catalog. Existing treatment and claim fee fields are
 snapshots. Provider IDs, historical names and confirmation metadata accompany the saved
 amount. Catalog edits, renames and archiving do not recalculate previous charges.
-Historical initial selections are retained when explicit corrections change a source;
+Explicit pricing corrections replace the line's current source through the existing audited editing workflow;
 there is no patient-recommendation lookup in this version.
 
 Existing claim notes/status/insurance-text edits preserve untouched line amounts and

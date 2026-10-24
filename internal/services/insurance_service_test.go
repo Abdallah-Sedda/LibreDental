@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,9 +133,41 @@ func TestInsuranceServiceEndToEnd(t *testing.T) {
 	if _, err := billing.UpdateClaim(token, direct); err != nil {
 		t.Fatal(err)
 	}
+	updated, err := billing.GetClaim(token, direct.ID)
+	if err != nil || updated.LineItems[0].Fee != 14000 || updated.LineItems[0].Pricing == nil || updated.LineItems[0].Pricing.ProviderName != "User Entered Company" {
+		t.Fatal("notes edit changed direct pricing snapshot", updated, err)
+	}
+	if _, err := svc.SaveProvider(token, &domain.InsuranceProvider{Name: "User Entered Company"}); err == nil {
+		t.Fatal("duplicate accepted")
+	}
+	if err := svc.SaveFee(token, &domain.InsuranceFee{ProviderID: insurer.ID, CountryCode: domain.CountryUS, Code: "D2391", Fee: -1}); err == nil {
+		t.Fatal("invalid fee accepted")
+	}
+	if err := svc.DeleteFee(token, "", "US", "D2391"); err == nil {
+		t.Fatal("invalid removal accepted")
+	}
+	if _, err := chart.SaveToothCondition(token, &domain.SaveToothConditionPayload{ID: "nonbillable-review", PatientID: "a", ToothNumber: 1, Status: domain.ToothStatusExisting}); err != nil {
+		t.Fatal(err)
+	}
 	logs, err := audit.GetAuditLogs(token, "", 1000, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, resource := range []string{"insurance_provider", "insurance_fee"} {
+		found := false
+		for _, l := range logs {
+			if l.Resource == resource && strings.Contains(l.Details, "failed:") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing failure audit for %s", resource)
+		}
+	}
+	for _, l := range logs {
+		if l.Resource == "pricing" && strings.Contains(l.Details, "nonbillable-review") {
+			t.Fatal("nonbillable finding logged as pricing request")
+		}
 	}
 	for _, resource := range []string{"insurance_provider", "insurance_fee", "pricing", "claim", "dental_chart"} {
 		found := false

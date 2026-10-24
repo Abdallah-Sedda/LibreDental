@@ -71,8 +71,10 @@ func (s *ChartService) SaveToothCondition(token string, payload *domain.SaveToot
 	var isInsert bool
 	var err error
 	if s.pricing != nil {
-		if err = s.auditService.LogPatientAction(token, domain.AuditActionUpdate, c.PatientID, "pricing", fmt.Sprintf("Requested treatment %s pricing: %s", c.ID, insuranceDetails(c.Pricing))); err != nil {
-			return nil, err
+		if c.Status == domain.ToothStatusTreatmentPlanned || c.Status == domain.ToothStatusCompleted {
+			if err = s.auditService.LogPatientAction(token, domain.AuditActionUpdate, c.PatientID, "pricing", fmt.Sprintf("Requested treatment %s pricing: %s", c.ID, insuranceDetails(c.Pricing))); err != nil {
+				return nil, err
+			}
 		}
 		isInsert, err = s.pricing.ConfirmCondition(context.Background(), c)
 	} else {

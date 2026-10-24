@@ -375,14 +375,8 @@ func (r *InsuranceRepository) ConfirmClaim(ctx context.Context, c *domain.Claim,
 		}
 		lineIDs[li.ID] = true
 		preserved := false
-		correction := false
-		var prior *domain.PricingSource
 		if old != nil {
 			for _, prev := range old.LineItems {
-				if prev.ID == li.ID && old.PatientID == c.PatientID {
-					correction = true
-					prior = prev.Pricing
-				}
 				if prev.ID == li.ID && old.PatientID == c.PatientID && prev.ADACode == li.ADACode && prev.Fee == li.Fee && prev.ToothConditionID == li.ToothConditionID {
 					li.Pricing = prev.Pricing
 					preserved = true
@@ -418,11 +412,6 @@ func (r *InsuranceRepository) ConfirmClaim(ctx context.Context, c *domain.Claim,
 					return e
 				}
 			}
-			continue
-		}
-		// Legacy and manual claim correction operations remain explicit audited edits.
-		if correction && li.Pricing == nil {
-			li.Pricing = prior
 			continue
 		}
 		if li.Pricing != nil && li.Pricing.ClinicianID != c.ProviderID {

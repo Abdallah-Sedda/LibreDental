@@ -15,7 +15,7 @@
     formADACode = $bindable(""),
     formDescription = $bindable(""),
     formStatus = $bindable(ToothStatus.ToothStatusTreatmentPlanned),
-    formFee = $bindable(0),
+    formFee = $bindable(),
     isEditingCondition,
     editingConditionId,
     procedurePresets,
