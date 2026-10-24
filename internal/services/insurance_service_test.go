@@ -149,7 +149,7 @@ func TestInsuranceServiceEndToEnd(t *testing.T) {
 	if _, err := chart.SaveToothCondition(token, &domain.SaveToothConditionPayload{ID: "nonbillable-review", PatientID: "a", ToothNumber: 1, Status: domain.ToothStatusExisting}); err != nil {
 		t.Fatal(err)
 	}
-	logs, err := audit.GetAuditLogs(token, "", 1000, 0)
+	logs, err := audit.GetAuditLogs(token, "", 1000, "")
 	if err != nil {
 		t.Fatal(err)
 	}
